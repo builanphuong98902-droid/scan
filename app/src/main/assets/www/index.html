@@ -3,14 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scanner Web & Native Bridge</title>
+    <title>Barcode Scanner Performance Test</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @keyframes pulse-subtle {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.6; }
-        }
-        .animate-pulse-subtle { animation: pulse-subtle 1.2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
         .laser-line {
             position: absolute;
             left: 5%;
@@ -18,7 +13,7 @@
             height: 2px;
             background: #ef4444;
             box-shadow: 0 0 10px 2px #ef4444;
-            animation: scan 1.8s linear infinite;
+            animation: scan 1.5s linear infinite;
         }
         @keyframes scan {
             0% { top: 15%; }
@@ -27,132 +22,105 @@
         }
     </style>
 </head>
-<body class="bg-slate-50 text-slate-800 min-h-screen font-sans flex flex-col antialiased selection:bg-blue-500 selection:text-white">
+<body class="bg-slate-100 text-slate-800 min-h-screen font-sans flex flex-col antialiased">
 
-    <!-- App Header Bar -->
-    <header class="bg-white border-b border-slate-200 sticky top-0 z-30 px-4 py-3 shadow-xs">
-        <div class="max-w-5xl mx-auto flex items-center justify-between">
-            <div class="flex items-center space-x-3">
-                <div class="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-white shadow-xs">
-                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-                    </svg>
+    <!-- Header -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-30 px-4 py-2.5 shadow-xs">
+        <div class="max-w-4xl mx-auto flex items-center justify-between">
+            <div class="flex items-center space-x-2.5">
+                <div class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white shadow-xs text-sm">
+                    ⚡
                 </div>
                 <div>
-                    <h1 class="font-bold text-base text-slate-900 tracking-tight">QAD001 Barcode Tablet System</h1>
-                    <p class="text-xs text-blue-600 font-mono font-medium" id="device-info">SM-T295 Native Hardware Bridge</p>
+                    <h1 class="font-bold text-sm text-slate-900 tracking-tight">Kiểm Thử Hiệu Năng Scanner</h1>
+                    <p class="text-[11px] text-blue-600 font-mono" id="device-info">SM-T295 1080p Multi-Pass Engine</p>
                 </div>
             </div>
 
             <div class="flex items-center space-x-2">
-                <span id="native-status-badge" class="px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1.5">
+                <span id="native-status-badge" class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
                     <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                    <span>Native Bridge Ready</span>
+                    <span>Native OK</span>
                 </span>
             </div>
         </div>
     </header>
 
-    <!-- Main Content Container -->
-    <main class="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 space-y-4">
+    <!-- Main Container -->
+    <main class="flex-1 max-w-4xl w-full mx-auto p-3 sm:p-4 space-y-3">
 
-        <!-- Banner & Quick Action Cards -->
-        <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs flex flex-col md:flex-row items-center justify-between gap-4">
-            <div class="space-y-1 text-center md:text-left">
-                <div class="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold">
-                    <span class="w-2 h-2 rounded-full bg-blue-600"></span>
-                    <span>Hệ Thống Quét Mã Vạch Kép (Native + Web)</span>
-                </div>
-                <h2 class="text-lg font-bold text-slate-900">Giải Mã Mã Vạch Tốc Độ Cao & Truyền Log Tự Động</h2>
-                <p class="text-xs text-slate-600 max-w-xl">Hỗ trợ nhận diện mã thùng HU (10 số), thùng SSCC (18-20 số) và mã SKU sản phẩm. Mã quét từ Native CameraX sẽ được truyền lập tức vào lịch sử WebView.</p>
+        <!-- Top Benchmark Stats Bar -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <div class="bg-white border border-slate-200 rounded-xl p-3 shadow-xs text-center">
+                <div class="text-[11px] text-slate-500 uppercase font-semibold">Tốc Độ Giải Mã</div>
+                <div id="stat-latency" class="text-lg font-extrabold text-blue-600 font-mono">0 ms</div>
             </div>
-            
-            <!-- Dual Scan Mode Action Buttons -->
-            <div class="flex items-center gap-2.5 shrink-0">
-                <button onclick="triggerNativeScanner()" class="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md hover:shadow-lg transition-all active:scale-95 flex items-center gap-2">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h0.93a2 2 0 001.664-.89l0.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l0.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                    Quét Native ZXing
-                </button>
-                <button onclick="openCameraModal()" class="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md hover:shadow-lg transition-all active:scale-95 flex items-center gap-2">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-                    Quét Web Camera
-                </button>
-                <button onclick="resetScanScreen()" class="px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold border border-slate-200 transition-all">
-                    Reset
-                </button>
+            <div class="bg-white border border-slate-200 rounded-xl p-3 shadow-xs text-center">
+                <div class="text-[11px] text-slate-500 uppercase font-semibold">Tổng Đã Quét</div>
+                <div id="stat-total" class="text-lg font-extrabold text-slate-800 font-mono">0 mã</div>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-xl p-3 shadow-xs text-center col-span-2 sm:col-span-2">
+                <div class="text-[11px] text-slate-500 uppercase font-semibold">Mã Vạch Mới Nhất</div>
+                <div id="stat-last-code" class="text-sm font-bold text-emerald-600 font-mono truncate">[Chưa có]</div>
             </div>
         </div>
 
-        <!-- Inputs Section -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <!-- HU Input -->
-            <div class="bg-white border border-slate-200 rounded-2xl p-4 space-y-2 shadow-xs">
-                <div class="flex items-center justify-between text-xs">
-                    <span class="text-slate-700 font-bold">Thùng HU (10 Số)</span>
-                    <span id="hu-scanned-val" class="font-mono text-slate-400 text-xs">[Chưa quét]</span>
-                </div>
-                <input type="text" id="manual-hu-input" placeholder="Nhập hoặc quét mã HU..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono text-blue-900 focus:bg-white focus:border-blue-600 focus:ring-1 focus:ring-blue-600 focus:outline-none transition-all">
+        <!-- Action Bar -->
+        <div class="bg-white border border-slate-200 rounded-xl p-3 shadow-xs flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+                <button onclick="triggerNativeScanner()" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs active:scale-95 flex items-center gap-1.5 transition-all">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h0.93a2 2 0 001.664-.89l0.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l0.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path></svg>
+                    Quét Native (Siêu Tốc)
+                </button>
+                <button onclick="openCameraModal()" class="px-3.5 py-2 rounded-lg bg-slate-700 hover:bg-slate-800 text-white font-semibold text-xs shadow-xs active:scale-95 transition-all">
+                    Quét Web
+                </button>
             </div>
+            <button onclick="resetScanScreen()" class="px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium border border-slate-200">
+                Làm Mới
+            </button>
+        </div>
 
-            <!-- SSCC Input -->
-            <div class="bg-white border border-slate-200 rounded-2xl p-4 space-y-2 shadow-xs">
-                <div class="flex items-center justify-between text-xs">
-                    <span class="text-slate-700 font-bold">Thùng SSCC (18-20 Số)</span>
-                    <span id="sscc-scanned-val" class="font-mono text-slate-400 text-xs">[Chưa quét]</span>
-                </div>
-                <input type="text" id="manual-sscc-input" placeholder="Nhập hoặc quét mã SSCC..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono text-emerald-900 focus:bg-white focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 focus:outline-none transition-all">
+        <!-- Auto-Categorization Slots -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <div class="bg-white border border-slate-200 rounded-xl p-3 space-y-1">
+                <label class="text-[11px] font-bold text-slate-700">Mã HU (10 Số)</label>
+                <input type="text" id="manual-hu-input" placeholder="Mã HU..." class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-mono text-blue-900 focus:outline-none">
             </div>
-
-            <!-- SKU Product Input -->
-            <div class="bg-white border border-slate-200 rounded-2xl p-4 space-y-2 shadow-xs">
-                <div class="flex items-center justify-between text-xs">
-                    <span class="text-slate-700 font-bold">Sản Phẩm SKU</span>
-                    <span id="prod-input-status" class="text-slate-400 text-[11px]">Chờ quét...</span>
-                </div>
-                <input type="text" id="manual-prod-input" placeholder="Nhập hoặc quét SKU / Barcode..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono text-purple-900 focus:bg-white focus:border-purple-600 focus:ring-1 focus:ring-purple-600 focus:outline-none transition-all">
+            <div class="bg-white border border-slate-200 rounded-xl p-3 space-y-1">
+                <label class="text-[11px] font-bold text-slate-700">Mã SSCC (18-20 Số)</label>
+                <input type="text" id="manual-sscc-input" placeholder="Mã SSCC..." class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-mono text-emerald-900 focus:outline-none">
+            </div>
+            <div class="bg-white border border-slate-200 rounded-xl p-3 space-y-1">
+                <label class="text-[11px] font-bold text-slate-700">SKU / Khác</label>
+                <input type="text" id="manual-prod-input" placeholder="Mã SKU..." class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-mono text-purple-900 focus:outline-none">
             </div>
         </div>
 
-        <!-- Status Bar Indicator -->
-        <div class="bg-white border border-slate-200 rounded-2xl p-3.5 shadow-xs flex items-center justify-between">
-            <div class="flex items-center gap-2.5">
-                <span class="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse"></span>
-                <span id="scanner-status" class="text-xs text-blue-700 font-bold">Sẵn sàng nhận dữ liệu quét...</span>
-            </div>
-            <div class="flex items-center gap-2 text-xs font-mono text-slate-500">
-                <span id="total-scanned-count" class="font-bold text-slate-700">Tổng: 0 mã</span>
-            </div>
-        </div>
-
-        <!-- Scan Logs Display Table -->
-        <div class="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 shadow-xs">
-            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
-                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
-                    <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-                    Lịch Sử Quét Mã Vạch (Logs)
-                </h3>
-                <div class="flex items-center gap-3">
-                    <button onclick="clearLogs()" class="text-xs text-slate-500 hover:text-red-600 font-semibold transition-all">Xóa Lịch Sử</button>
-                </div>
+        <!-- Log Table -->
+        <div class="bg-white border border-slate-200 rounded-xl p-3 space-y-2 shadow-xs">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+                <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700">Nhật Ký Quét & Thời Gian Giải Mã</h2>
+                <button onclick="clearLogs()" class="text-[11px] text-slate-400 hover:text-red-600 font-semibold">Xóa Log</button>
             </div>
 
-            <!-- Table Container -->
             <div class="overflow-x-auto">
                 <table class="w-full text-left text-xs border-collapse">
                     <thead>
-                        <tr class="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-semibold text-[11px]">
-                            <th class="py-2.5 px-3">#</th>
-                            <th class="py-2.5 px-3">Thời gian</th>
-                            <th class="py-2.5 px-3">Nguồn Quét</th>
-                            <th class="py-2.5 px-3">Giá Trị Mã Vạch</th>
-                            <th class="py-2.5 px-3">Định Dạng</th>
-                            <th class="py-2.5 px-3 text-right">Thao tác</th>
+                        <tr class="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase text-[10px] font-bold">
+                            <th class="py-2 px-2.5">#</th>
+                            <th class="py-2 px-2.5">Thời Gian</th>
+                            <th class="py-2 px-2.5">Nguồn</th>
+                            <th class="py-2 px-2.5">Giá Trị Mã</th>
+                            <th class="py-2 px-2.5">Loại Mã</th>
+                            <th class="py-2 px-2.5 text-center">Độ Trễ</th>
+                            <th class="py-2 px-2.5 text-right">Thao Tác</th>
                         </tr>
                     </thead>
                     <tbody id="scan-logs-table-body" class="divide-y divide-slate-100 font-mono">
                         <tr id="empty-log-row">
-                            <td colspan="6" class="py-8 text-center text-slate-400 italic">
-                                Chưa có dữ liệu quét. Hãy nhấn "Quét Native ZXing" hoặc "Quét Web Camera" để bắt đầu.
+                            <td colspan="7" class="py-6 text-center text-slate-400 italic">
+                                Sẵn sàng kiểm thử. Bấm "Quét Native (Siêu Tốc)" để bắt đầu.
                             </td>
                         </tr>
                     </tbody>
@@ -162,44 +130,25 @@
 
     </main>
 
-    <!-- Web Camera Scanner Modal Overlay -->
-    <div id="camera-modal" class="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm hidden flex-col items-center justify-center p-3 sm:p-4">
-        <div id="camera-modal-body" class="relative w-full max-w-xl bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-2xl flex flex-col">
-            <!-- Modal Header -->
-            <div class="bg-slate-50 px-4 py-3 flex items-center justify-between border-b border-slate-200">
-                <div class="flex items-center gap-2">
-                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                    <span class="font-bold text-xs sm:text-sm text-slate-900">Web Camera Scanner</span>
-                </div>
-                <button onclick="stopCameraScanner()" class="p-1 rounded-lg hover:bg-slate-200 text-slate-500 hover:text-slate-800 transition-all">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
+    <!-- Web Camera Modal -->
+    <div id="camera-modal" class="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs hidden flex-col items-center justify-center p-3">
+        <div class="relative w-full max-w-lg bg-white rounded-xl overflow-hidden shadow-xl flex flex-col">
+            <div class="bg-slate-50 px-3 py-2 flex items-center justify-between border-b border-slate-200">
+                <span class="font-bold text-xs text-slate-900">Web Camera Mode</span>
+                <button onclick="stopCameraScanner()" class="p-1 text-slate-500 hover:text-slate-800">✕</button>
             </div>
-
-            <!-- Video Viewfinder Frame -->
             <div class="relative bg-black w-full aspect-video flex items-center justify-center overflow-hidden">
                 <video id="web-video-element" class="w-full h-full object-cover" autoplay playsinline></video>
                 <div class="laser-line"></div>
-                <div id="camera-placeholder" class="absolute text-slate-300 text-xs font-semibold">Đang kích hoạt camera Web...</div>
+                <div id="camera-placeholder" class="absolute text-slate-300 text-xs">Đang mở camera web...</div>
             </div>
-
-            <!-- Footer Controls -->
-            <div class="p-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-2 text-xs">
-                <span class="text-slate-500 font-medium">Đưa mã vạch vào vùng camera</span>
-                <div class="flex items-center gap-2">
-                    <button onclick="stopCameraScanner(); triggerNativeScanner();" class="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-xs">
-                        Chuyển Quét Native
-                    </button>
-                    <button onclick="stopCameraScanner()" class="px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold">
-                        Đóng
-                    </button>
-                </div>
+            <div class="p-2.5 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 text-xs">
+                <button onclick="stopCameraScanner()" class="px-3 py-1.5 rounded-lg bg-slate-200 text-slate-700 font-medium">Đóng</button>
             </div>
         </div>
     </div>
 
     <script>
-        // Native Android Bridge state check
         const isAndroidNative = typeof window.AndroidNative !== 'undefined' || typeof window.AndroidScanner !== 'undefined';
         const nativeBridge = window.AndroidNative || window.AndroidScanner;
         let scanLogCounter = 0;
@@ -207,25 +156,12 @@
         let lastHandledTime = 0;
 
         document.addEventListener('DOMContentLoaded', () => {
-            const badge = document.getElementById('native-status-badge');
             const devInfo = document.getElementById('device-info');
-
-            if (isAndroidNative && nativeBridge) {
-                try {
-                    const info = nativeBridge.getTabletInfo ? nativeBridge.getTabletInfo() : "Tablet SM-T295 Native Bridge Connected";
-                    devInfo.innerText = info;
-                    badge.className = "px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1.5";
-                    badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span><span>Native Bridge Ready</span>`;
-                } catch (e) {
-                    console.warn("Native bridge check error", e);
-                }
-            } else {
-                badge.className = "px-3 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-1.5";
-                badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-blue-500"></span><span>Web Mode</span>`;
+            if (isAndroidNative && nativeBridge && nativeBridge.getTabletInfo) {
+                devInfo.innerText = nativeBridge.getTabletInfo();
             }
         });
 
-        // Trigger Native Android CameraX ZXing Scanner
         function triggerNativeScanner() {
             if (isAndroidNative && nativeBridge && nativeBridge.scanBarcodeNative) {
                 nativeBridge.scanBarcodeNative();
@@ -234,15 +170,13 @@
             }
         }
 
-        // Global callback functions invoked by Native Android via evaluateJavascript
-        window.onNativeBarcodeScanned = function(code, format) {
-            handleScannedCode(code, 'Native ZXing', format || 'CODE_128');
+        window.onNativeBarcodeScanned = function(code, format, decodeMs) {
+            handleScannedCode(code, 'Native ZXing', format || 'BARCODE', decodeMs || 0);
         };
 
-        window.handleScannedCode = function(code, source = 'Scanner', format = 'RAW') {
+        window.handleScannedCode = function(code, source = 'Scanner', format = 'RAW', decodeMs = 0) {
             if (!code) return;
             const nowTime = Date.now();
-            // Debounce identical code scanned within 800ms
             if (code === lastHandledBarcode && (nowTime - lastHandledTime < 800)) {
                 return;
             }
@@ -251,83 +185,60 @@
 
             playSuccessBeep();
             if (isAndroidNative && nativeBridge && nativeBridge.vibrate) {
-                nativeBridge.vibrate(50);
+                nativeBridge.vibrate(40);
             }
 
-            addLogToTable(code, source, format);
+            addLogToTable(code, source, format, decodeMs);
             autoFillInputs(code);
 
-            const status = document.getElementById('scanner-status');
-            status.innerText = `[${source}] Đã nhận: ${code}`;
-            status.className = "text-xs text-emerald-700 font-bold";
+            document.getElementById('stat-latency').innerText = `${decodeMs || '<10'} ms`;
+            document.getElementById('stat-last-code').innerText = code;
         };
 
-        // Custom Event Listener for nativeBarcodeScanned
         window.addEventListener('nativeBarcodeScanned', (event) => {
             if (event.detail && event.detail.barcode) {
-                handleScannedCode(event.detail.barcode, 'Native ZXing', event.detail.format || 'BARCODE');
+                handleScannedCode(event.detail.barcode, 'Native ZXing', event.detail.format || 'BARCODE', event.detail.decodeMs || 0);
             }
         });
 
-        // Polling fallback when window regains focus (e.g. after native camera closes)
-        window.addEventListener('focus', () => {
-            checkLastScannedFromNative();
-        });
-
-        function checkLastScannedFromNative() {
-            if (isAndroidNative && nativeBridge && nativeBridge.getLastScannedBarcode) {
-                const code = nativeBridge.getLastScannedBarcode();
-                const format = nativeBridge.getLastScannedFormat ? nativeBridge.getLastScannedFormat() : 'NATIVE';
-                if (code && code !== lastHandledBarcode) {
-                    handleScannedCode(code, 'Native ZXing', format);
-                }
-            }
-        }
-
-        function addLogToTable(code, source, format) {
+        function addLogToTable(code, source, format, decodeMs) {
             const tbody = document.getElementById('scan-logs-table-body');
             const emptyRow = document.getElementById('empty-log-row');
-            if (emptyRow) {
-                emptyRow.remove();
-            }
+            if (emptyRow) emptyRow.remove();
 
             scanLogCounter++;
             const timeStr = new Date().toLocaleTimeString();
 
+            const latencyBadge = decodeMs > 0
+                ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold ${decodeMs < 50 ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">${decodeMs} ms</span>`
+                : `<span class="text-slate-400 text-[10px]">N/A</span>`;
+
             const tr = document.createElement('tr');
-            tr.className = 'hover:bg-slate-50/80 transition-colors animate-pulse-subtle';
-
-            const sourceBadge = source.includes('Native') 
-                ? `<span class="px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 text-[10px] font-bold border border-blue-200">Native ZXing</span>`
-                : `<span class="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-200">Web Camera</span>`;
-
+            tr.className = 'hover:bg-slate-50 transition-colors';
             tr.innerHTML = `
-                <td class="py-2.5 px-3 font-bold text-slate-400 text-xs">${scanLogCounter}</td>
-                <td class="py-2.5 px-3 text-slate-500 text-xs">${timeStr}</td>
-                <td class="py-2.5 px-3">${sourceBadge}</td>
-                <td class="py-2.5 px-3 font-bold text-slate-900 text-xs tracking-wide">${escapeHtml(code)}</td>
-                <td class="py-2.5 px-3 text-slate-500 text-xs">${escapeHtml(format)}</td>
-                <td class="py-2.5 px-3 text-right">
-                    <button onclick="copyToClipboard('${escapeHtml(code)}')" class="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold text-[11px] border border-slate-200 transition-all">
+                <td class="py-2 px-2.5 font-bold text-slate-400 text-xs">${scanLogCounter}</td>
+                <td class="py-2 px-2.5 text-slate-500 text-[11px]">${timeStr}</td>
+                <td class="py-2 px-2.5"><span class="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-bold">Native</span></td>
+                <td class="py-2 px-2.5 font-bold text-slate-900 text-xs tracking-wide">${escapeHtml(code)}</td>
+                <td class="py-2 px-2.5 text-slate-500 text-[11px]">${escapeHtml(format)}</td>
+                <td class="py-2 px-2.5 text-center">${latencyBadge}</td>
+                <td class="py-2 px-2.5 text-right">
+                    <button onclick="copyToClipboard('${escapeHtml(code)}')" class="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold text-[10px] border border-slate-200">
                         Copy
                     </button>
                 </td>
             `;
 
             tbody.prepend(tr);
-            document.getElementById('total-scanned-count').innerText = `Tổng: ${scanLogCounter} mã`;
+            document.getElementById('stat-total').innerText = `${scanLogCounter} mã`;
         }
 
         function autoFillInputs(code) {
             const clean = code.trim().replace(/[()]/g, '');
             if (/^\d{10}$/.test(clean)) {
                 document.getElementById('manual-hu-input').value = clean;
-                document.getElementById('hu-scanned-val').innerText = clean;
-                document.getElementById('hu-scanned-val').className = "font-mono text-emerald-600 font-bold text-xs";
             } else if (/^\d{18,22}$/.test(clean)) {
                 document.getElementById('manual-sscc-input').value = clean;
-                document.getElementById('sscc-scanned-val').innerText = clean;
-                document.getElementById('sscc-scanned-val').className = "font-mono text-emerald-600 font-bold text-xs";
             } else {
                 document.getElementById('manual-prod-input').value = clean;
             }
@@ -337,23 +248,21 @@
             const tbody = document.getElementById('scan-logs-table-body');
             tbody.innerHTML = `
                 <tr id="empty-log-row">
-                    <td colspan="6" class="py-8 text-center text-slate-400 italic">
-                        Chưa có dữ liệu quét. Hãy nhấn "Quét Native ZXing" hoặc "Quét Web Camera" để bắt đầu.
+                    <td colspan="7" class="py-6 text-center text-slate-400 italic">
+                        Sẵn sàng kiểm thử. Bấm "Quét Native (Siêu Tốc)" để bắt đầu.
                     </td>
                 </tr>
             `;
             scanLogCounter = 0;
-            document.getElementById('total-scanned-count').innerText = "Tổng: 0 mã";
+            document.getElementById('stat-total').innerText = "0 mã";
+            document.getElementById('stat-latency').innerText = "0 ms";
+            document.getElementById('stat-last-code').innerText = "[Chưa có]";
         }
 
         function resetScanScreen() {
             document.getElementById('manual-hu-input').value = '';
             document.getElementById('manual-sscc-input').value = '';
             document.getElementById('manual-prod-input').value = '';
-            document.getElementById('hu-scanned-val').innerText = '[Chưa quét]';
-            document.getElementById('sscc-scanned-val').innerText = '[Chưa quét]';
-            document.getElementById('scanner-status').innerText = 'Sẵn sàng nhận dữ liệu quét...';
-            document.getElementById('scanner-status').className = 'text-xs text-blue-700 font-bold';
         }
 
         function copyToClipboard(text) {
@@ -366,41 +275,35 @@
             return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         }
 
-        // Web Audio Synthesizer Beep Feedback
         function playSuccessBeep() {
             try {
                 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 const osc = audioCtx.createOscillator();
                 const gain = audioCtx.createGain();
                 osc.type = 'sine';
-                osc.frequency.setValueAtTime(1046.5, audioCtx.currentTime); // C6 tone
+                osc.frequency.setValueAtTime(1046.5, audioCtx.currentTime);
                 gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
-                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.12);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
                 osc.connect(gain);
                 gain.connect(audioCtx.destination);
                 osc.start();
-                osc.stop(audioCtx.currentTime + 0.12);
+                osc.stop(audioCtx.currentTime + 0.1);
             } catch (e) { }
         }
 
-        // HTML5 Web Camera Scanner Modal logic
         let webCameraStream = null;
-
         function openCameraModal() {
             document.getElementById('camera-modal').classList.remove('hidden');
             document.getElementById('camera-modal').classList.add('flex');
-            
             if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
                 navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
                     .then(stream => {
                         webCameraStream = stream;
-                        const video = document.getElementById('web-video-element');
-                        video.srcObject = stream;
+                        document.getElementById('web-video-element').srcObject = stream;
                         document.getElementById('camera-placeholder').style.display = 'none';
                     })
                     .catch(err => {
-                        console.error("Web camera error", err);
-                        document.getElementById('camera-placeholder').innerText = 'Không thể mở camera web: ' + err.message;
+                        document.getElementById('camera-placeholder').innerText = 'Lỗi camera web: ' + err.message;
                     });
             }
         }
@@ -413,8 +316,6 @@
                 webCameraStream.getTracks().forEach(track => track.stop());
                 webCameraStream = null;
             }
-            const video = document.getElementById('web-video-element');
-            if (video) video.srcObject = null;
         }
     </script>
 </body>

@@ -91,16 +91,16 @@ class MainActivity : ComponentActivity() {
                     onLoadUrl = { url ->
                         webViewInstance?.loadUrl(url)
                     },
-                    onSendBarcodeToWebView = { code, format ->
+                    onSendBarcodeToWebView = { code, format, decodeMs ->
                         webAppInterface?.updateScannedBarcode(code, format)
-                        dispatchBarcodeToWebView(webViewInstance, code, format)
+                        dispatchBarcodeToWebView(webViewInstance, code, format, decodeMs)
                     }
                 )
             }
         }
     }
 
-    private fun dispatchBarcodeToWebView(webView: WebView?, code: String, format: String) {
+    private fun dispatchBarcodeToWebView(webView: WebView?, code: String, format: String, decodeMs: Long) {
         if (webView == null) return
         val jsonCode = JSONObject.quote(code)
         val jsonFormat = JSONObject.quote(format)
@@ -108,16 +108,17 @@ class MainActivity : ComponentActivity() {
             (function() {
                 var code = $jsonCode;
                 var format = $jsonFormat;
-                console.log("Native dispatched barcode to WebView: " + code + " (" + format + ")");
+                var decodeMs = $decodeMs;
+                console.log("Native dispatched barcode in " + decodeMs + "ms: " + code + " (" + format + ")");
                 
                 if (typeof window.onNativeBarcodeScanned === 'function') {
-                    window.onNativeBarcodeScanned(code, format);
+                    window.onNativeBarcodeScanned(code, format, decodeMs);
                 }
                 if (typeof window.handleScannedCode === 'function') {
-                    window.handleScannedCode(code, 'Native ' + format);
+                    window.handleScannedCode(code, 'Native ' + format, format, decodeMs);
                 }
                 try {
-                    var event = new CustomEvent('nativeBarcodeScanned', { detail: { barcode: code, format: format } });
+                    var event = new CustomEvent('nativeBarcodeScanned', { detail: { barcode: code, format: format, decodeMs: decodeMs } });
                     window.dispatchEvent(event);
                     document.dispatchEvent(event);
                 } catch(e) { }
@@ -136,7 +137,7 @@ fun MainScreen(
     onInitWebView: (WebView, WebAppInterface) -> Unit,
     onReloadWebView: () -> Unit,
     onLoadUrl: (String) -> Unit,
-    onSendBarcodeToWebView: (code: String, format: String) -> Unit
+    onSendBarcodeToWebView: (code: String, format: String, decodeMs: Long) -> Unit
 ) {
     val context = LocalContext.current
     val webUrl by viewModel.webUrl.collectAsState()
@@ -430,9 +431,9 @@ fun MainScreen(
                 exit = fadeOut()
             ) {
                 CameraOverlay(
-                    onBarcodeScanned = { code, format ->
+                    onBarcodeScanned = { code, format, decodeMs ->
                         viewModel.onBarcodeScanned(code, format)
-                        onSendBarcodeToWebView(code, format)
+                        onSendBarcodeToWebView(code, format, decodeMs)
                         viewModel.closeNativeScanner()
                     },
                     onClose = {

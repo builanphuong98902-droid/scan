@@ -62,7 +62,7 @@ import java.util.concurrent.TimeUnit
 
 @Composable
 fun CameraOverlay(
-    onBarcodeScanned: (code: String, format: String) -> Unit,
+    onBarcodeScanned: (code: String, format: String, decodeMs: Long) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -72,6 +72,8 @@ fun CameraOverlay(
     var lensFacing by remember { mutableStateOf(CameraSelector.LENS_FACING_BACK) }
     var isFlashOn by remember { mutableStateOf(false) }
     var cameraControl by remember { mutableStateOf<androidx.camera.core.CameraControl?>(null) }
+    var lastDecodeLatency by remember { mutableStateOf<Long?>(null) }
+    var lastDecodedCode by remember { mutableStateOf<String?>(null) }
 
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
 
@@ -86,7 +88,7 @@ fun CameraOverlay(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // CameraX Viewfinder with Tap-to-Focus
+        // CameraX Viewfinder with Tap-to-Focus & 1080p resolution
         AndroidView(
             factory = { ctx ->
                 val previewView = PreviewView(ctx).apply {
@@ -101,19 +103,23 @@ fun CameraOverlay(
                 cameraProviderFuture.addListener({
                     val cameraProvider = cameraProviderFuture.get()
 
-                    val preview = Preview.Builder().build().also {
-                        it.surfaceProvider = previewView.surfaceProvider
-                    }
+                    val preview = Preview.Builder()
+                        .setTargetResolution(Size(1920, 1080))
+                        .build().also {
+                            it.surfaceProvider = previewView.surfaceProvider
+                        }
 
                     val imageAnalysis = ImageAnalysis.Builder()
-                        .setTargetResolution(Size(1280, 720))
+                        .setTargetResolution(Size(1920, 1080))
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build()
 
                     imageAnalysis.setAnalyzer(
                         cameraExecutor,
-                        NativeBarcodeScanner { code, format ->
-                            onBarcodeScanned(code, format)
+                        NativeBarcodeScanner { code, format, decodeMs ->
+                            lastDecodeLatency = decodeMs
+                            lastDecodedCode = code
+                            onBarcodeScanned(code, format, decodeMs)
                         }
                     )
 
@@ -141,9 +147,9 @@ fun CameraOverlay(
                                     .build()
                                 camera.cameraControl.startFocusAndMetering(action)
                             } catch (_: Exception) {}
-                        }, 500)
+                        }, 300)
 
-                        // Enable tap to focus on touch
+                        // Enable tap to focus
                         previewView.setOnTouchListener { view, event ->
                             if (event.action == MotionEvent.ACTION_DOWN) {
                                 try {
@@ -175,7 +181,7 @@ fun CameraOverlay(
             initialValue = 0.1f,
             targetValue = 0.9f,
             animationSpec = infiniteRepeatable(
-                animation = tween(1500, easing = LinearEasing),
+                animation = tween(1200, easing = LinearEasing),
                 repeatMode = RepeatMode.Reverse
             ),
             label = "LaserLine"
@@ -192,11 +198,11 @@ fun CameraOverlay(
             ) {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth(0.9f)
-                        .height(220.dp)
+                        .fillMaxWidth(0.92f)
+                        .height(230.dp)
                         .clip(RoundedCornerShape(16.dp))
-                        .border(2.5.dp, Color(0xFF0284C7), RoundedCornerShape(16.dp))
-                        .background(Color.Black.copy(alpha = 0.25f))
+                        .border(2.5.dp, Color(0xFF3B82F6), RoundedCornerShape(16.dp))
+                        .background(Color.Black.copy(alpha = 0.2f))
                 ) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         val y = size.height * laserProgress
@@ -209,19 +215,24 @@ fun CameraOverlay(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 Surface(
-                    color = Color.Black.copy(alpha = 0.7f),
+                    color = Color.Black.copy(alpha = 0.75f),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text(
-                        text = "Hướng camera vào mã vạch (HU, SSCC, SKU)",
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = lastDecodedCode?.let { "Đã giải mã: $it (${lastDecodeLatency ?: 0}ms)" }
+                                ?: "Giải mã đa tầng (Hybrid + ROI + Inverted + Stretch)",
+                            color = if (lastDecodedCode != null) Color(0xFF4ADE80) else Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }
@@ -230,13 +241,13 @@ fun CameraOverlay(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 40.dp, start = 16.dp, end = 16.dp),
+                .padding(top = 36.dp, start = 16.dp, end = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
-                color = Color.Black.copy(alpha = 0.65f),
+                color = Color.Black.copy(alpha = 0.75f),
                 shape = RoundedCornerShape(20.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0284C7))
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF3B82F6))
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -249,7 +260,7 @@ fun CameraOverlay(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Native CameraX Scanner",
+                        text = "1080p High-Precision Engine",
                         color = Color.White,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
@@ -278,7 +289,7 @@ fun CameraOverlay(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // Flip
+            // Switch Camera
             IconButton(
                 onClick = {
                     lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
