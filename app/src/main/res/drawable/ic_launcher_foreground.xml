@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer tablet frame -->
+    <path
+        android:fillColor="#0284C7"
+        android:pathData="M30,24h48c3.3,0 6,2.7 6,6v48c0,3.3 -2.7,6 -6,6H30c-3.3,0 -6,-2.7 -6,-6V30c0,-3.3 2.7,-6 6,-6z" />
+    <path
+        android:fillColor="#0F172A"
+        android:pathData="M34,28h40c1.1,0 2,0.9 2,2v48c0,1.1 -0.9,2 -2,2H34c-1.1,0 -2,-0.9 -2,-2V30c0,-1.1 0.9,-2 2,-2z" />
+    <!-- Barcode lines -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M38,36h3v36h-3z M43,36h5v36h-5z M50,36h2v36h-2z M54,36h6v36h-6z M62,36h3v36h-3z M67,36h3v36h-3z" />
+    <!-- Laser line -->
+    <path
+        android:fillColor="#EF4444"
+        android:pathData="M32,53h44v2H32z" />
+</vector>

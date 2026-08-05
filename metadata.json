@@ -1,0 +1,6 @@
+{
+  "name": "Native WebView Barcode Scanner",
+  "description": "High-performance Android WebView container optimized for tablets (SM-T295) with hardware camera permissions & native ZXing barcode scanning bridge.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
