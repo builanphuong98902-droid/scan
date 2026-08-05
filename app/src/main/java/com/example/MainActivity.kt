@@ -14,20 +14,17 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,7 +41,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -69,11 +65,13 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.example.ui.theme.MyApplicationTheme
+import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
     private var webViewInstance: WebView? = null
+    private var webAppInterface: WebAppInterface? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -83,8 +81,9 @@ class MainActivity : ComponentActivity() {
             MyApplicationTheme {
                 MainScreen(
                     viewModel = viewModel,
-                    onInitWebView = { webView ->
+                    onInitWebView = { webView, appInterface ->
                         webViewInstance = webView
+                        webAppInterface = appInterface
                     },
                     onReloadWebView = {
                         webViewInstance?.reload()
@@ -93,11 +92,40 @@ class MainActivity : ComponentActivity() {
                         webViewInstance?.loadUrl(url)
                     },
                     onSendBarcodeToWebView = { code, format ->
-                        val js = "window.onNativeBarcodeScanned && window.onNativeBarcodeScanned('${code.replace("'", "\\'")}', '${format}')"
-                        webViewInstance?.evaluateJavascript(js, null)
+                        webAppInterface?.updateScannedBarcode(code, format)
+                        dispatchBarcodeToWebView(webViewInstance, code, format)
                     }
                 )
             }
+        }
+    }
+
+    private fun dispatchBarcodeToWebView(webView: WebView?, code: String, format: String) {
+        if (webView == null) return
+        val jsonCode = JSONObject.quote(code)
+        val jsonFormat = JSONObject.quote(format)
+        val js = """
+            (function() {
+                var code = $jsonCode;
+                var format = $jsonFormat;
+                console.log("Native dispatched barcode to WebView: " + code + " (" + format + ")");
+                
+                if (typeof window.onNativeBarcodeScanned === 'function') {
+                    window.onNativeBarcodeScanned(code, format);
+                }
+                if (typeof window.handleScannedCode === 'function') {
+                    window.handleScannedCode(code, 'Native ' + format);
+                }
+                try {
+                    var event = new CustomEvent('nativeBarcodeScanned', { detail: { barcode: code, format: format } });
+                    window.dispatchEvent(event);
+                    document.dispatchEvent(event);
+                } catch(e) { }
+            })();
+        """.trimIndent()
+        
+        webView.post {
+            webView.evaluateJavascript(js, null)
         }
     }
 }
@@ -105,7 +133,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainScreen(
     viewModel: MainViewModel,
-    onInitWebView: (WebView) -> Unit,
+    onInitWebView: (WebView, WebAppInterface) -> Unit,
     onReloadWebView: () -> Unit,
     onLoadUrl: (String) -> Unit,
     onSendBarcodeToWebView: (code: String, format: String) -> Unit
@@ -117,7 +145,6 @@ fun MainScreen(
 
     var urlInputText by remember { mutableStateOf(webUrl) }
 
-    // Check camera permission
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -162,7 +189,7 @@ fun MainScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            // Title & Logo
+                            // App Title & System Subtitle
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.weight(1f)
@@ -243,7 +270,7 @@ fun MainScreen(
                                     )
                                 }
 
-                                // Native ZXing Scanner Button (Fixed height to prevent vertical stretching)
+                                // Native ZXing Scanner Button
                                 Button(
                                     onClick = {
                                         if (!hasCameraPermission) {
@@ -257,7 +284,7 @@ fun MainScreen(
                                     ),
                                     shape = RoundedCornerShape(10.dp),
                                     modifier = Modifier.height(38.dp),
-                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.CameraAlt,
@@ -273,7 +300,7 @@ fun MainScreen(
 
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        // URL Bar
+                        // URL Address Bar
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
@@ -324,7 +351,7 @@ fun MainScreen(
                     }
                 }
 
-                // Camera Permission Missing Banner
+                // Camera Permission Warning Banner
                 if (!hasCameraPermission) {
                     Surface(
                         color = Color(0xFF7F1D1D),
@@ -387,7 +414,7 @@ fun MainScreen(
                                     webAppInterface = webAppInterface
                                 )
 
-                                onInitWebView(this)
+                                onInitWebView(this, webAppInterface)
                                 loadUrl(webUrl)
                             }
                         },

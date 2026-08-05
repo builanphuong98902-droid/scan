@@ -1,6 +1,5 @@
 package com.example
 
-import android.media.Image
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.camera.core.ExperimentalGetImage
@@ -12,8 +11,9 @@ import com.google.zxing.DecodeHintType
 import com.google.zxing.MultiFormatReader
 import com.google.zxing.NotFoundException
 import com.google.zxing.PlanarYUVLuminanceSource
+import com.google.zxing.Result
+import com.google.zxing.common.GlobalHistogramBinarizer
 import com.google.zxing.common.HybridBinarizer
-import java.nio.ByteBuffer
 import java.util.EnumMap
 
 class NativeBarcodeScanner(
@@ -29,9 +29,9 @@ class NativeBarcodeScanner(
                     BarcodeFormat.EAN_13,
                     BarcodeFormat.UPC_A,
                     BarcodeFormat.CODE_39,
+                    BarcodeFormat.ITF,
                     BarcodeFormat.QR_CODE,
                     BarcodeFormat.DATA_MATRIX,
-                    BarcodeFormat.ITF,
                     BarcodeFormat.PDF_417
                 )
             )
@@ -42,7 +42,7 @@ class NativeBarcodeScanner(
 
     private var lastScannedCode = ""
     private var lastScannedTimestamp = 0L
-    private val debounceMs = 1200L
+    private val debounceMs = 1000L
 
     @OptIn(ExperimentalGetImage::class)
     override fun analyze(imageProxy: ImageProxy) {
@@ -52,38 +52,97 @@ class NativeBarcodeScanner(
             return
         }
 
-        val buffer = mediaImage.planes[0].buffer
-        val data = toByteArray(buffer)
-        val width = mediaImage.width
-        val height = mediaImage.height
-
-        val source = PlanarYUVLuminanceSource(
-            data,
-            width,
-            height,
-            0,
-            0,
-            width,
-            height,
-            false
-        )
-
-        val bitmap = BinaryBitmap(HybridBinarizer(source))
-
         try {
-            val result = reader.decodeWithState(bitmap)
-            val code = result.text.trim()
-            val format = result.barcodeFormat.name
-            val now = System.currentTimeMillis()
+            val rotationDegrees = imageProxy.imageInfo.rotationDegrees
+            val yPlane = mediaImage.planes[0]
+            val yBuffer = yPlane.buffer
+            val rowStride = yPlane.rowStride
+            val rawWidth = imageProxy.width
+            val rawHeight = imageProxy.height
 
-            if (code.isNotEmpty() && (code != lastScannedCode || now - lastScannedTimestamp > debounceMs)) {
-                lastScannedCode = code
-                lastScannedTimestamp = now
-                Log.d("NativeZXing", "Scanned: $code ($format)")
-                onBarcodeScanned(code, format)
+            // 1. Extract exact Y bytes handling rowStride padding
+            val yData: ByteArray
+            if (rowStride == rawWidth) {
+                yData = ByteArray(yBuffer.remaining())
+                yBuffer.get(yData)
+            } else {
+                yData = ByteArray(rawWidth * rawHeight)
+                val rowBuffer = ByteArray(rowStride)
+                val limit = yBuffer.remaining()
+                for (i in 0 until rawHeight) {
+                    val pos = i * rowStride
+                    if (pos >= limit) break
+                    yBuffer.position(pos)
+                    val bytesToRead = minOf(rowStride, limit - pos)
+                    yBuffer.get(rowBuffer, 0, bytesToRead)
+                    val copyLen = minOf(rawWidth, bytesToRead)
+                    System.arraycopy(rowBuffer, 0, yData, i * rawWidth, copyLen)
+                }
             }
-        } catch (_: NotFoundException) {
-            // No barcode found in frame
+
+            // 2. Rotate YUV data according to sensor orientation so ZXing receives a properly aligned image
+            val rotatedData: ByteArray
+            val width: Int
+            val height: Int
+
+            when (rotationDegrees) {
+                90 -> {
+                    rotatedData = rotateYUV90(yData, rawWidth, rawHeight)
+                    width = rawHeight
+                    height = rawWidth
+                }
+                180 -> {
+                    rotatedData = rotateYUV180(yData, rawWidth, rawHeight)
+                    width = rawWidth
+                    height = rawHeight
+                }
+                270 -> {
+                    rotatedData = rotateYUV270(yData, rawWidth, rawHeight)
+                    width = rawHeight
+                    height = rawWidth
+                }
+                else -> {
+                    rotatedData = yData
+                    width = rawWidth
+                    height = rawHeight
+                }
+            }
+
+            val source = PlanarYUVLuminanceSource(
+                rotatedData,
+                width,
+                height,
+                0,
+                0,
+                width,
+                height,
+                false
+            )
+
+            // Try fast GlobalHistogramBinarizer first (optimal for 1D barcodes)
+            var result: Result? = null
+            try {
+                result = reader.decodeWithState(BinaryBitmap(GlobalHistogramBinarizer(source)))
+            } catch (_: NotFoundException) {
+                reader.reset()
+                // Fallback to HybridBinarizer if GlobalHistogram missed it
+                try {
+                    result = reader.decodeWithState(BinaryBitmap(HybridBinarizer(source)))
+                } catch (_: NotFoundException) { }
+            }
+
+            if (result != null) {
+                val code = result.text.trim()
+                val format = result.barcodeFormat.name
+                val now = System.currentTimeMillis()
+
+                if (code.isNotEmpty() && (code != lastScannedCode || now - lastScannedTimestamp > debounceMs)) {
+                    lastScannedCode = code
+                    lastScannedTimestamp = now
+                    Log.d("NativeZXing", "Scanned: $code ($format)")
+                    onBarcodeScanned(code, format)
+                }
+            }
         } catch (e: Exception) {
             Log.e("NativeZXing", "Error analyzing frame", e)
         } finally {
@@ -92,10 +151,34 @@ class NativeBarcodeScanner(
         }
     }
 
-    private fun toByteArray(buffer: ByteBuffer): ByteArray {
-        buffer.rewind()
-        val data = ByteArray(buffer.remaining())
-        buffer.get(data)
-        return data
+    private fun rotateYUV90(data: ByteArray, imageWidth: Int, imageHeight: Int): ByteArray {
+        val rotated = ByteArray(data.size)
+        var i = 0
+        for (x in 0 until imageWidth) {
+            for (y in imageHeight - 1 downTo 0) {
+                rotated[i++] = data[y * imageWidth + x]
+            }
+        }
+        return rotated
+    }
+
+    private fun rotateYUV180(data: ByteArray, imageWidth: Int, imageHeight: Int): ByteArray {
+        val rotated = ByteArray(data.size)
+        var i = 0
+        for (j in data.size - 1 downTo 0) {
+            rotated[i++] = data[j]
+        }
+        return rotated
+    }
+
+    private fun rotateYUV270(data: ByteArray, imageWidth: Int, imageHeight: Int): ByteArray {
+        val rotated = ByteArray(data.size)
+        var i = 0
+        for (x in imageWidth - 1 downTo 0) {
+            for (y in 0 until imageHeight) {
+                rotated[i++] = data[y * imageWidth + x]
+            }
+        }
+        return rotated
     }
 }

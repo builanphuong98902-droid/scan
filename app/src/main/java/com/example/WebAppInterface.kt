@@ -15,6 +15,16 @@ class WebAppInterface(
 ) {
     private val tag = "WebAppInterface"
 
+    @Volatile
+    private var scannedBarcode: String = ""
+    @Volatile
+    private var scannedFormat: String = ""
+
+    fun updateScannedBarcode(code: String, format: String) {
+        scannedBarcode = code
+        scannedFormat = format
+    }
+
     @JavascriptInterface
     fun scanBarcodeNative() {
         Log.d(tag, "JS requested Native CameraX ZXing Scanner")
@@ -25,6 +35,16 @@ class WebAppInterface(
     fun sendBarcodeToNative(barcode: String) {
         Log.d(tag, "Received barcode from Web JS: $barcode")
         onBarcodeFromJs(barcode)
+    }
+
+    @JavascriptInterface
+    fun getLastScannedBarcode(): String {
+        return scannedBarcode
+    }
+
+    @JavascriptInterface
+    fun getLastScannedFormat(): String {
+        return scannedFormat
     }
 
     @JavascriptInterface

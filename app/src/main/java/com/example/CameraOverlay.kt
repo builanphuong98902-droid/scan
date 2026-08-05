@@ -1,8 +1,10 @@
 package com.example
 
 import android.util.Size
+import android.view.MotionEvent
 import android.view.ViewGroup
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -20,7 +22,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -36,7 +37,6 @@ import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 @Composable
 fun CameraOverlay(
@@ -85,7 +86,7 @@ fun CameraOverlay(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // CameraX Viewfinder
+        // CameraX Viewfinder with Tap-to-Focus
         AndroidView(
             factory = { ctx ->
                 val previewView = PreviewView(ctx).apply {
@@ -129,6 +130,35 @@ fun CameraOverlay(
                             imageAnalysis
                         )
                         cameraControl = camera.cameraControl
+
+                        // Trigger initial center auto-focus
+                        previewView.postDelayed({
+                            try {
+                                val factory = previewView.meteringPointFactory
+                                val point = factory.createPoint(previewView.width / 2f, previewView.height / 2f)
+                                val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF)
+                                    .setAutoCancelDuration(2, TimeUnit.SECONDS)
+                                    .build()
+                                camera.cameraControl.startFocusAndMetering(action)
+                            } catch (_: Exception) {}
+                        }, 500)
+
+                        // Enable tap to focus on touch
+                        previewView.setOnTouchListener { view, event ->
+                            if (event.action == MotionEvent.ACTION_DOWN) {
+                                try {
+                                    val factory = previewView.meteringPointFactory
+                                    val point = factory.createPoint(event.x, event.y)
+                                    val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF)
+                                        .setAutoCancelDuration(2, TimeUnit.SECONDS)
+                                        .build()
+                                    camera.cameraControl.startFocusAndMetering(action)
+                                } catch (_: Exception) {}
+                                view.performClick()
+                            }
+                            true
+                        }
+
                     } catch (e: Exception) {
                         e.printStackTrace()
                     }
@@ -145,7 +175,7 @@ fun CameraOverlay(
             initialValue = 0.1f,
             targetValue = 0.9f,
             animationSpec = infiniteRepeatable(
-                animation = tween(1800, easing = LinearEasing),
+                animation = tween(1500, easing = LinearEasing),
                 repeatMode = RepeatMode.Reverse
             ),
             label = "LaserLine"
@@ -154,25 +184,43 @@ fun CameraOverlay(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(32.dp),
+                .padding(24.dp),
             contentAlignment = Alignment.Center
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.85f)
-                    .height(240.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .border(2.dp, Color(0xFF38BDF8), RoundedCornerShape(16.dp))
-                    .background(Color.Black.copy(alpha = 0.2f))
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Laser line canvas
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val y = size.height * laserProgress
-                    drawLine(
-                        color = Color(0xFFEF4444),
-                        start = Offset(16.dp.toPx(), y),
-                        end = Offset(size.width - 16.dp.toPx(), y),
-                        strokeWidth = 3.dp.toPx()
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.9f)
+                        .height(220.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(2.5.dp, Color(0xFF0284C7), RoundedCornerShape(16.dp))
+                        .background(Color.Black.copy(alpha = 0.25f))
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val y = size.height * laserProgress
+                        drawLine(
+                            color = Color(0xFFEF4444),
+                            start = Offset(12.dp.toPx(), y),
+                            end = Offset(size.width - 12.dp.toPx(), y),
+                            strokeWidth = 3.dp.toPx()
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Surface(
+                    color = Color.Black.copy(alpha = 0.7f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        text = "Hướng camera vào mã vạch (HU, SSCC, SKU)",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                     )
                 }
             }
@@ -186,7 +234,7 @@ fun CameraOverlay(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
-                color = Color.Black.copy(alpha = 0.6f),
+                color = Color.Black.copy(alpha = 0.65f),
                 shape = RoundedCornerShape(20.dp),
                 border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF0284C7))
             ) {
@@ -201,7 +249,7 @@ fun CameraOverlay(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "CameraX ZXing Native 60FPS",
+                        text = "Native CameraX Scanner",
                         color = Color.White,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
@@ -211,7 +259,7 @@ fun CameraOverlay(
 
             Spacer(modifier = Modifier.weight(1f))
 
-            // Flash Toggle
+            // Flashlight
             IconButton(
                 onClick = {
                     isFlashOn = !isFlashOn
@@ -219,7 +267,7 @@ fun CameraOverlay(
                 },
                 modifier = Modifier
                     .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.6f))
+                    .background(Color.Black.copy(alpha = 0.65f))
             ) {
                 Icon(
                     imageVector = if (isFlashOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
@@ -230,7 +278,7 @@ fun CameraOverlay(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // Camera Flip
+            // Flip
             IconButton(
                 onClick = {
                     lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
@@ -241,7 +289,7 @@ fun CameraOverlay(
                 },
                 modifier = Modifier
                     .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.6f))
+                    .background(Color.Black.copy(alpha = 0.65f))
             ) {
                 Icon(
                     imageVector = Icons.Default.FlipCameraAndroid,
