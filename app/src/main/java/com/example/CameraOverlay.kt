@@ -1,8 +1,13 @@
 package com.example
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.util.Log
 import android.util.Size
 import android.view.MotionEvent
 import android.view.ViewGroup
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
@@ -35,12 +40,15 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.FlipCameraAndroid
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,6 +77,27 @@ fun CameraOverlay(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.CAMERA
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        hasCameraPermission = isGranted
+    }
+
+    LaunchedEffect(Unit) {
+        if (!hasCameraPermission) {
+            permissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
     var lensFacing by remember { mutableStateOf(CameraSelector.LENS_FACING_BACK) }
     var isFlashOn by remember { mutableStateOf(false) }
     var cameraControl by remember { mutableStateOf<androidx.camera.core.CameraControl?>(null) }
@@ -88,92 +117,120 @@ fun CameraOverlay(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // CameraX Viewfinder with Tap-to-Focus & 1080p resolution
-        AndroidView(
-            factory = { ctx ->
-                val previewView = PreviewView(ctx).apply {
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                    scaleType = PreviewView.ScaleType.FILL_CENTER
-                }
-
-                val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                cameraProviderFuture.addListener({
-                    val cameraProvider = cameraProviderFuture.get()
-
-                    val preview = Preview.Builder()
-                        .setTargetResolution(Size(1280, 720))
-                        .build().also {
-                            it.surfaceProvider = previewView.surfaceProvider
-                        }
-
-                    val imageAnalysis = ImageAnalysis.Builder()
-                        .setTargetResolution(Size(1280, 720))
-                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                        .build()
-
-                    imageAnalysis.setAnalyzer(
-                        cameraExecutor,
-                        NativeBarcodeScanner { code, format, decodeMs ->
-                            lastDecodeLatency = decodeMs
-                            lastDecodedCode = code
-                            onBarcodeScanned(code, format, decodeMs)
-                        }
-                    )
-
-                    val cameraSelector = CameraSelector.Builder()
-                        .requireLensFacing(lensFacing)
-                        .build()
-
-                    try {
-                        cameraProvider.unbindAll()
-                        val camera = cameraProvider.bindToLifecycle(
-                            lifecycleOwner,
-                            cameraSelector,
-                            preview,
-                            imageAnalysis
+        if (hasCameraPermission) {
+            // CameraX Viewfinder with Tap-to-Focus & 720p resolution
+            AndroidView(
+                factory = { ctx ->
+                    val previewView = PreviewView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
                         )
-                        cameraControl = camera.cameraControl
+                        scaleType = PreviewView.ScaleType.FILL_CENTER
+                    }
 
-                        // Trigger initial center auto-focus
-                        previewView.postDelayed({
-                            try {
-                                val factory = previewView.meteringPointFactory
-                                val point = factory.createPoint(previewView.width / 2f, previewView.height / 2f)
-                                val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF)
-                                    .setAutoCancelDuration(2, TimeUnit.SECONDS)
-                                    .build()
-                                camera.cameraControl.startFocusAndMetering(action)
-                            } catch (_: Exception) {}
-                        }, 300)
+                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                    cameraProviderFuture.addListener({
+                        try {
+                            if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                                return@addListener
+                            }
+                            val cameraProvider = cameraProviderFuture.get()
 
-                        // Enable tap to focus
-                        previewView.setOnTouchListener { view, event ->
-                            if (event.action == MotionEvent.ACTION_DOWN) {
+                            val preview = Preview.Builder()
+                                .setTargetResolution(Size(1280, 720))
+                                .build().also {
+                                    it.surfaceProvider = previewView.surfaceProvider
+                                }
+
+                            val imageAnalysis = ImageAnalysis.Builder()
+                                .setTargetResolution(Size(1280, 720))
+                                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                .build()
+
+                            imageAnalysis.setAnalyzer(
+                                cameraExecutor,
+                                NativeBarcodeScanner { code, format, decodeMs ->
+                                    lastDecodeLatency = decodeMs
+                                    lastDecodedCode = code
+                                    onBarcodeScanned(code, format, decodeMs)
+                                }
+                            )
+
+                            val cameraSelector = CameraSelector.Builder()
+                                .requireLensFacing(lensFacing)
+                                .build()
+
+                            cameraProvider.unbindAll()
+                            val camera = cameraProvider.bindToLifecycle(
+                                lifecycleOwner,
+                                cameraSelector,
+                                preview,
+                                imageAnalysis
+                            )
+                            cameraControl = camera.cameraControl
+
+                            // Trigger initial center auto-focus
+                            previewView.postDelayed({
                                 try {
                                     val factory = previewView.meteringPointFactory
-                                    val point = factory.createPoint(event.x, event.y)
+                                    val point = factory.createPoint(previewView.width / 2f, previewView.height / 2f)
                                     val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF)
                                         .setAutoCancelDuration(2, TimeUnit.SECONDS)
                                         .build()
                                     camera.cameraControl.startFocusAndMetering(action)
                                 } catch (_: Exception) {}
-                                view.performClick()
+                            }, 300)
+
+                            // Enable tap to focus
+                            previewView.setOnTouchListener { view, event ->
+                                if (event.action == MotionEvent.ACTION_DOWN) {
+                                    try {
+                                        val factory = previewView.meteringPointFactory
+                                        val point = factory.createPoint(event.x, event.y)
+                                        val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF)
+                                            .setAutoCancelDuration(2, TimeUnit.SECONDS)
+                                            .build()
+                                        camera.cameraControl.startFocusAndMetering(action)
+                                    } catch (_: Exception) {}
+                                    view.performClick()
+                                }
+                                true
                             }
-                            true
+
+                        } catch (e: Exception) {
+                            Log.e("CameraOverlay", "Error setting up camera", e)
                         }
+                    }, ContextCompat.getMainExecutor(ctx))
 
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }, ContextCompat.getMainExecutor(ctx))
-
-                previewView
-            },
-            modifier = Modifier.fillMaxSize()
-        )
+                    previewView
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            // Permission missing state
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
+            ) {
+                Text(
+                    text = "Cần quyền truy cập Camera để quét mã",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+                Button(
+                    onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                ) {
+                    Text("Cấp Quyền Camera")
+                }
+            }
+        }
 
         // Laser Scan Box Overlay
         val infiniteTransition = rememberInfiniteTransition(label = "LaserTransition")
@@ -227,7 +284,7 @@ fun CameraOverlay(
                     ) {
                         Text(
                             text = lastDecodedCode?.let { "Đã giải mã: $it (${lastDecodeLatency ?: 0}ms)" }
-                                ?: "Giải mã đa tầng (Hybrid + ROI + Inverted + Stretch)",
+                                ?: "Xử lý mã Code 128 mờ/xước (Xử lý xước xọc + Tăng tương phản)",
                             color = if (lastDecodedCode != null) Color(0xFF4ADE80) else Color.White,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold

@@ -403,7 +403,15 @@ fun MainScreen(
                                 val webAppInterface = WebAppInterface(
                                     context = ctx,
                                     onTriggerNativeScanner = {
-                                        viewModel.openNativeScanner()
+                                        val granted = ContextCompat.checkSelfPermission(
+                                            ctx,
+                                            Manifest.permission.CAMERA
+                                        ) == PackageManager.PERMISSION_GRANTED
+                                        if (granted) {
+                                            viewModel.openNativeScanner()
+                                        } else {
+                                            permissionLauncher.launch(Manifest.permission.CAMERA)
+                                        }
                                     },
                                     onBarcodeFromJs = { barcode ->
                                         viewModel.onBarcodeScanned(barcode, "Web JS")
