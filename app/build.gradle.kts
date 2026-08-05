@@ -27,23 +27,24 @@ android {
     create("release") {
       val customKeystorePath = System.getenv("KEYSTORE_PATH")
       val customKeystore = if (customKeystorePath != null) file(customKeystorePath) else null
+      val rootKeystore = file("${rootDir}/debug.keystore")
       if (customKeystore != null && customKeystore.exists()) {
         storeFile = customKeystore
         storePassword = System.getenv("STORE_PASSWORD")
         keyAlias = "upload"
         keyPassword = System.getenv("KEY_PASSWORD")
-      } else {
-        storeFile = file("${rootDir}/debug.keystore")
+      } else if (rootKeystore.exists()) {
+        storeFile = rootKeystore
         storePassword = "android"
         keyAlias = "androiddebugkey"
         keyPassword = "android"
+      } else {
+        val defaultDebug = signingConfigs.getByName("debug")
+        storeFile = defaultDebug.storeFile
+        storePassword = defaultDebug.storePassword
+        keyAlias = defaultDebug.keyAlias
+        keyPassword = defaultDebug.keyPassword
       }
-    }
-    create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
     }
   }
 
@@ -54,7 +55,19 @@ android {
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
-    debug { signingConfig = signingConfigs.getByName("debugConfig") }
+    debug {
+      val rootKeystore = file("${rootDir}/debug.keystore")
+      if (rootKeystore.exists()) {
+        val debugConfig = signingConfigs.maybeCreate("debugConfig")
+        debugConfig.storeFile = rootKeystore
+        debugConfig.storePassword = "android"
+        debugConfig.keyAlias = "androiddebugkey"
+        debugConfig.keyPassword = "android"
+        signingConfig = debugConfig
+      } else {
+        signingConfig = signingConfigs.getByName("debug")
+      }
+    }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
