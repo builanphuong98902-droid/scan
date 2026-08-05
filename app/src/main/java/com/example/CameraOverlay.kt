@@ -104,13 +104,13 @@ fun CameraOverlay(
                     val cameraProvider = cameraProviderFuture.get()
 
                     val preview = Preview.Builder()
-                        .setTargetResolution(Size(1920, 1080))
+                        .setTargetResolution(Size(1280, 720))
                         .build().also {
                             it.surfaceProvider = previewView.surfaceProvider
                         }
 
                     val imageAnalysis = ImageAnalysis.Builder()
-                        .setTargetResolution(Size(1920, 1080))
+                        .setTargetResolution(Size(1280, 720))
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build()
 

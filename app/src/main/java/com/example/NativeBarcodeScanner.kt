@@ -63,27 +63,28 @@ class NativeBarcodeScanner(
             val rawWidth = imageProxy.width
             val rawHeight = imageProxy.height
 
-            // 1. Extract Y plane bytes safely handling rowStride padding
-            val yData: ByteArray
+            // 1. Crucial: Rewind buffer before reading
+            yBuffer.rewind()
+            val yData = ByteArray(rawWidth * rawHeight)
+
             if (rowStride == rawWidth) {
-                yData = ByteArray(yBuffer.remaining())
-                yBuffer.get(yData)
+                val toRead = minOf(yBuffer.remaining(), yData.size)
+                yBuffer.get(yData, 0, toRead)
             } else {
-                yData = ByteArray(rawWidth * rawHeight)
                 val rowBuffer = ByteArray(rowStride)
-                val limit = yBuffer.remaining()
+                val totalRemaining = yBuffer.remaining()
                 for (i in 0 until rawHeight) {
                     val pos = i * rowStride
-                    if (pos >= limit) break
+                    if (pos >= totalRemaining) break
                     yBuffer.position(pos)
-                    val bytesToRead = minOf(rowStride, limit - pos)
+                    val bytesToRead = minOf(rowStride, totalRemaining - pos)
                     yBuffer.get(rowBuffer, 0, bytesToRead)
                     val copyLen = minOf(rawWidth, bytesToRead)
                     System.arraycopy(rowBuffer, 0, yData, i * rawWidth, copyLen)
                 }
             }
 
-            // 2. Rotate YUV data according to sensor orientation
+            // 2. Prepare rotated YUV data according to camera orientation
             val rotatedData: ByteArray
             val width: Int
             val height: Int
@@ -111,60 +112,48 @@ class NativeBarcodeScanner(
                 }
             }
 
-            val fullSource = PlanarYUVLuminanceSource(
-                rotatedData,
-                width,
-                height,
-                0,
-                0,
-                width,
-                height,
-                false
-            )
-
             var result: Result? = null
 
-            // Pass 1: Standard HybridBinarizer (Fastest & best for clean/normal codes)
-            result = tryDecode(fullSource, isHybrid = true)
+            // Pass 1: Upright orientation (GlobalHistogram then Hybrid)
+            val uprightSource = PlanarYUVLuminanceSource(
+                rotatedData, width, height, 0, 0, width, height, false
+            )
+            result = tryDecode(uprightSource, isHybrid = false) ?: tryDecode(uprightSource, isHybrid = true)
 
-            // Pass 2: GlobalHistogramBinarizer (Best for 1D codes with non-uniform lighting)
-            if (result == null) {
-                result = tryDecode(fullSource, isHybrid = false)
+            // Pass 2: Raw sensor orientation (handles perpendicular/orthogonal barcodes)
+            if (result == null && (width != rawWidth || height != rawHeight)) {
+                val rawSource = PlanarYUVLuminanceSource(
+                    yData, rawWidth, rawHeight, 0, 0, rawWidth, rawHeight, false
+                )
+                result = tryDecode(rawSource, isHybrid = false) ?: tryDecode(rawSource, isHybrid = true)
             }
 
-            // Pass 3: Inverted Luminance (Best for white-on-dark, high reflectivity, or inverse codes)
+            // Pass 3: Center ROI Crop (60% center box - for small or far barcodes)
             if (result == null) {
-                val invertedSource = fullSource.invert()
-                result = tryDecode(invertedSource, isHybrid = true) ?: tryDecode(invertedSource, isHybrid = false)
-            }
-
-            // Pass 4: Central ROI Zoom & Crop (50% Center Crop - Best for small/far/fine-line barcodes)
-            if (result == null) {
-                val cropW = width / 2
-                val cropH = height / 2
-                val cropL = width / 4
-                val cropT = height / 4
+                val cropW = (width * 0.6f).toInt()
+                val cropH = (height * 0.6f).toInt()
+                val cropL = (width - cropW) / 2
+                val cropT = (height - cropH) / 2
                 if (cropW > 100 && cropH > 100) {
-                    val croppedSource = fullSource.crop(cropL, cropT, cropW, cropH)
-                    result = tryDecode(croppedSource, isHybrid = true) ?: tryDecode(croppedSource, isHybrid = false)
+                    val cropSource = uprightSource.crop(cropL, cropT, cropW, cropH)
+                    result = tryDecode(cropSource, isHybrid = false) ?: tryDecode(cropSource, isHybrid = true)
                 }
             }
 
-            // Pass 5: Extreme Dynamic Contrast Stretching (Best for faded thermal print, low contrast, glare)
+            // Pass 4: Inverted Luminance (for white-on-dark or high glare barcodes)
+            if (result == null) {
+                val invertedSource = uprightSource.invert()
+                result = tryDecode(invertedSource, isHybrid = false) ?: tryDecode(invertedSource, isHybrid = true)
+            }
+
+            // Pass 5: Dynamic Contrast Stretching (for low-contrast or faded thermal prints)
             if (result == null) {
                 val stretchedData = stretchContrast(rotatedData)
                 if (stretchedData != null) {
                     val stretchedSource = PlanarYUVLuminanceSource(
-                        stretchedData,
-                        width,
-                        height,
-                        0,
-                        0,
-                        width,
-                        height,
-                        false
+                        stretchedData, width, height, 0, 0, width, height, false
                     )
-                    result = tryDecode(stretchedSource, isHybrid = true) ?: tryDecode(stretchedSource, isHybrid = false)
+                    result = tryDecode(stretchedSource, isHybrid = false) ?: tryDecode(stretchedSource, isHybrid = true)
                 }
             }
 
