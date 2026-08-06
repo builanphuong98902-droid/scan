@@ -114,57 +114,51 @@ class NativeBarcodeScanner(
 
             var result: Result? = null
 
-            // Pass 1: Standard upright image (GlobalHistogram + Hybrid)
-            val uprightSource = PlanarYUVLuminanceSource(
-                rotatedData, width, height, 0, 0, width, height, false
-            )
-            result = tryDecode(uprightSource, isHybrid = false) ?: tryDecode(uprightSource, isHybrid = true)
+            // 1. Upright & 90-degree Rotated (Full Frame)
+            result = tryDecodeOrientations(rotatedData, width, height)
 
-            // Pass 2: Thermal Print Head Gap Repair (Vertical Min Filter)
-            // Repairs broken/faded vertical bars caused by defective thermal print pins
+            // 2. 2x Downsampled (Essential for close-up barcodes with wide modules)
             if (result == null) {
-                val healedData = repairThermalPrintHeadGaps(rotatedData, width, height)
-                val healedSource = PlanarYUVLuminanceSource(
-                    healedData, width, height, 0, 0, width, height, false
-                )
-                result = tryDecode(healedSource, isHybrid = false) ?: tryDecode(healedSource, isHybrid = true)
+                val dsData = downsample2x(rotatedData, width, height)
+                result = tryDecodeOrientations(dsData, width / 2, height / 2)
             }
 
-            // Pass 3: Center ROI Crop (High-density focus on central barcode region)
+            // 3. Thermal Print Head Gap Repair (Vertical Min Filter for broken/scratched thermal bars)
+            if (result == null) {
+                val healedData = repairThermalPrintHeadGaps(rotatedData, width, height)
+                result = tryDecodeOrientations(healedData, width, height)
+            }
+
+            // 4. Center ROI Crop (70% central area for focused scanning)
             if (result == null) {
                 val cropW = (width * 0.7f).toInt()
                 val cropH = (height * 0.7f).toInt()
                 val cropL = (width - cropW) / 2
                 val cropT = (height - cropH) / 2
-                if (cropW > 100 && cropH > 100) {
-                    val cropSource = uprightSource.crop(cropL, cropT, cropW, cropH)
-                    result = tryDecode(cropSource, isHybrid = false) ?: tryDecode(cropSource, isHybrid = true)
+                if (cropW > 80 && cropH > 80) {
+                    val cropData = cropYUV(rotatedData, width, height, cropL, cropT, cropW, cropH)
+                    result = tryDecodeOrientations(cropData, cropW, cropH)
                 }
             }
 
-            // Pass 4: Adaptive Contrast Stretching & Sharpening for faint/faded thermal paper
+            // 5. Adaptive Thermal Contrast Stretching & Sharpening
             if (result == null) {
                 val enhancedData = enhanceFadedThermalContrast(rotatedData, width, height)
                 if (enhancedData != null) {
-                    val enhancedSource = PlanarYUVLuminanceSource(
-                        enhancedData, width, height, 0, 0, width, height, false
-                    )
-                    result = tryDecode(enhancedSource, isHybrid = false) ?: tryDecode(enhancedSource, isHybrid = true)
+                    result = tryDecodeOrientations(enhancedData, width, height)
                 }
             }
 
-            // Pass 5: Inverted Luminance (for white-on-dark or high thermal paper reflectivity)
+            // 6. Inverted Luminance (for white-on-dark or glossy thermal reflection)
             if (result == null) {
+                val uprightSource = PlanarYUVLuminanceSource(rotatedData, width, height, 0, 0, width, height, false)
                 val invertedSource = uprightSource.invert()
                 result = tryDecode(invertedSource, isHybrid = false) ?: tryDecode(invertedSource, isHybrid = true)
             }
 
-            // Pass 6: Raw sensor orientation (handles orthogonal/rotated barcodes)
+            // 7. Raw Unrotated Sensor Fallback
             if (result == null && (width != rawWidth || height != rawHeight)) {
-                val rawSource = PlanarYUVLuminanceSource(
-                    yData, rawWidth, rawHeight, 0, 0, rawWidth, rawHeight, false
-                )
-                result = tryDecode(rawSource, isHybrid = false) ?: tryDecode(rawSource, isHybrid = true)
+                result = tryDecodeOrientations(yData, rawWidth, rawHeight)
             }
 
             if (result != null) {
@@ -197,6 +191,53 @@ class NativeBarcodeScanner(
         } finally {
             reader.reset()
         }
+    }
+
+    private fun tryDecodeOrientations(data: ByteArray, w: Int, h: Int): Result? {
+        // 1. Upright - GlobalHistogram (fastest & best for 1D barcodes like Code 128)
+        val uprightSource = PlanarYUVLuminanceSource(data, w, h, 0, 0, w, h, false)
+        var res = tryDecode(uprightSource, isHybrid = false)
+        if (res != null) return res
+
+        // 2. Upright - Hybrid
+        res = tryDecode(uprightSource, isHybrid = true)
+        if (res != null) return res
+
+        // 3. Rotated 90 degrees - GlobalHistogram (CRITICAL when barcode bars run horizontally across frame)
+        val rotated90Data = rotateYUV90(data, w, h)
+        val rot90Source = PlanarYUVLuminanceSource(rotated90Data, h, w, 0, 0, h, w, false)
+        res = tryDecode(rot90Source, isHybrid = false)
+        if (res != null) return res
+
+        // 4. Rotated 90 degrees - Hybrid
+        return tryDecode(rot90Source, isHybrid = true)
+    }
+
+    private fun downsample2x(data: ByteArray, w: Int, h: Int): ByteArray {
+        val newW = w / 2
+        val newH = h / 2
+        val output = ByteArray(newW * newH)
+        for (y in 0 until newH) {
+            val srcRow = y * 2 * w
+            val dstRow = y * newW
+            for (x in 0 until newW) {
+                output[dstRow + x] = data[srcRow + x * 2]
+            }
+        }
+        return output
+    }
+
+    private fun cropYUV(data: ByteArray, w: Int, h: Int, left: Int, top: Int, cropW: Int, cropH: Int): ByteArray {
+        val output = ByteArray(cropW * cropH)
+        for (y in 0 until cropH) {
+            val srcOffset = (top + y) * w + left
+            val dstOffset = y * cropW
+            val bytesToCopy = minOf(cropW, w - left)
+            if (bytesToCopy > 0 && srcOffset + bytesToCopy <= data.size && dstOffset + bytesToCopy <= output.size) {
+                System.arraycopy(data, srcOffset, output, dstOffset, bytesToCopy)
+            }
+        }
+        return output
     }
 
     private fun repairThermalPrintHeadGaps(data: ByteArray, w: Int, h: Int): ByteArray {

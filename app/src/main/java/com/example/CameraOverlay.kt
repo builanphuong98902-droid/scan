@@ -170,27 +170,35 @@ fun CameraOverlay(
                             )
                             cameraControl = camera.cameraControl
 
-                            // Trigger initial center auto-focus
-                            previewView.postDelayed({
-                                try {
-                                    val factory = previewView.meteringPointFactory
-                                    val point = factory.createPoint(previewView.width / 2f, previewView.height / 2f)
-                                    val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF)
-                                        .setAutoCancelDuration(2, TimeUnit.SECONDS)
-                                        .build()
-                                    camera.cameraControl.startFocusAndMetering(action)
-                                } catch (_: Exception) {}
-                            }, 300)
+                            // Continuous auto-focus loop every 1.5s to keep sharp focus when close-up
+                            val focusRunnable = object : Runnable {
+                                override fun run() {
+                                    try {
+                                        if (previewView.width > 0 && previewView.height > 0) {
+                                            val factory = previewView.meteringPointFactory
+                                            val point = factory.createPoint(previewView.width / 2f, previewView.height / 2f)
+                                            val action = FocusMeteringAction.Builder(
+                                                point,
+                                                FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE
+                                            ).setAutoCancelDuration(2, TimeUnit.SECONDS).build()
+                                            camera.cameraControl.startFocusAndMetering(action)
+                                        }
+                                    } catch (_: Exception) {}
+                                    previewView.postDelayed(this, 1500)
+                                }
+                            }
+                            previewView.postDelayed(focusRunnable, 300)
 
-                            // Enable tap to focus
+                            // Enable tap to focus on arbitrary point
                             previewView.setOnTouchListener { view, event ->
                                 if (event.action == MotionEvent.ACTION_DOWN) {
                                     try {
                                         val factory = previewView.meteringPointFactory
                                         val point = factory.createPoint(event.x, event.y)
-                                        val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF)
-                                            .setAutoCancelDuration(2, TimeUnit.SECONDS)
-                                            .build()
+                                        val action = FocusMeteringAction.Builder(
+                                            point,
+                                            FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE
+                                        ).setAutoCancelDuration(3, TimeUnit.SECONDS).build()
                                         camera.cameraControl.startFocusAndMetering(action)
                                     } catch (_: Exception) {}
                                     view.performClick()
