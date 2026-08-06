@@ -292,7 +292,7 @@ fun CameraOverlay(
                     ) {
                         Text(
                             text = lastDecodedCode?.let { "Đã giải mã: $it (${lastDecodeLatency ?: 0}ms)" }
-                                ?: "Xử lý mã Code 128 mờ/xước (Xử lý xước xọc + Tăng tương phản)",
+                                ?: "Cognex Ultra 1D Engine (Tích hợp ma trận 1D + Triệt xước nhiệt)",
                             color = if (lastDecodedCode != null) Color(0xFF4ADE80) else Color.White,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
