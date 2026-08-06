@@ -106,12 +106,33 @@ class NativeBarcodeScanner(
 
             var result: Result? = null
 
-            // STEP 1: Ultra-Fast Barcode ROI Localization (0-1ms)
-            // Locks onto exact [minX, minY, maxX, maxY] sub-array of 1D Code 128 vertical bars
-            val localizedBox = locateAnisotropyBarcodeBox(rotatedDataBuffer, width, height)
+            val centerW = (width * 0.85f).toInt()
+            val centerH = (height * 0.45f).toInt()
+            val centerL = (width - centerW) / 2
+            val centerT = (height - centerH) / 2
 
-            // STEP 2: Immediate Localized Sub-Array Decoding (1-2ms)
-            if (localizedBox != null) {
+            // STEP 1: Ultra-Fast 1D Binary Barcode Pattern Candidate Isolation (0-1ms)
+            // Evaluates 1D scanlines for alternating binary bar sequences, immediately locking onto
+            // the exact sub-array containing ONLY the barcode, bypassing surrounding text & borders.
+            if (centerW > 60 && centerH > 20) {
+                result = try1DBinaryCandidateSubArrayLock(rotatedDataBuffer, width, height, centerL, centerT, centerW, centerH)
+            }
+
+            // STEP 2: Fast Center Aiming Crop Direct Scan (0-1ms)
+            if (result == null && centerW > 60 && centerH > 20) {
+                val centerSource = PlanarYUVLuminanceSource(rotatedDataBuffer, width, height, centerL, centerT, centerW, centerH, false)
+                result = tryDecodeWithCode128(centerSource, isHybrid = false)
+                    ?: tryDecodeWithCode128(centerSource, isHybrid = true)
+            }
+
+            // STEP 3: Multi-Row 1D Scanline Sampling across Center Crop
+            if (result == null && centerW > 60 && centerH > 20) {
+                result = tryMultiLineScanlineDecode(rotatedDataBuffer, width, height, centerL, centerT, centerW, centerH)
+            }
+
+            // STEP 3: Ultra-Fast Anisotropy ROI Localization & Sub-Array Decoding
+            val localizedBox = if (result == null) locateAnisotropyBarcodeBox(rotatedDataBuffer, width, height) else null
+            if (result == null && localizedBox != null) {
                 val cropW = localizedBox.maxX - localizedBox.minX + 1
                 val cropH = localizedBox.maxY - localizedBox.minY + 1
                 if (cropW > 50 && cropH > 15) {
@@ -119,46 +140,33 @@ class NativeBarcodeScanner(
                         rotatedDataBuffer, width, height,
                         localizedBox.minX, localizedBox.minY, cropW, cropH, false
                     )
-                    // Direct decode on clean localized barcode array without text noise
                     result = tryDecodeWithCode128(localizedSource, isHybrid = false)
                         ?: tryDecodeWithCode128(localizedSource, isHybrid = true)
 
-                    // If raw crop fails, try localized column projection on localized box
                     if (result == null) {
                         result = tryLocalizedColumnProjection(rotatedDataBuffer, width, height, localizedBox)
                     }
                 }
             }
 
-            // STEP 3: Fallback Center Aiming Crop (If localization did not yield a result)
-            val centerW = (width * 0.80f).toInt()
-            val centerH = (height * 0.50f).toInt()
-            val centerL = (width - centerW) / 2
-            val centerT = (height - centerH) / 2
-
-            if (result == null && centerW > 60 && centerH > 20) {
-                val centerSource = PlanarYUVLuminanceSource(rotatedDataBuffer, width, height, centerL, centerT, centerW, centerH, false)
-                result = tryDecodeWithCode128(centerSource, isHybrid = false)
-                    ?: tryDecodeWithCode128(centerSource, isHybrid = true)
-            }
-
-            // STEP 4: Global Column Projection (For dirty/scratched vertical bars across full box)
+            // STEP 4: Global Column Projection (Integrates pixel columns for scratched vertical lines)
             if (result == null) {
                 result = tryCognexVerticalProjection(rotatedDataBuffer, width, height)
             }
 
-            // STEP 5: Localized Enhancement (Otsu & Unsharp Mask ONLY on localized ROI for max speed)
-            if (result == null && localizedBox != null) {
-                val cropW = localizedBox.maxX - localizedBox.minX + 1
-                val cropH = localizedBox.maxY - localizedBox.minY + 1
+            // STEP 5: Localized Enhancement (Otsu & Unsharp Mask ONLY on localized ROI or center)
+            if (result == null) {
+                val targetBox = localizedBox ?: BarcodeBox(centerL, centerT, centerL + centerW, centerT + centerH)
+                val cropW = targetBox.maxX - targetBox.minX + 1
+                val cropH = targetBox.maxY - targetBox.minY + 1
                 if (cropW > 50 && cropH > 15) {
                     applyPercentileOtsuInto(rotatedDataBuffer, enhancedDataBuffer, width, height)
-                    val otsuSource = PlanarYUVLuminanceSource(enhancedDataBuffer, width, height, localizedBox.minX, localizedBox.minY, cropW, cropH, false)
+                    val otsuSource = PlanarYUVLuminanceSource(enhancedDataBuffer, width, height, targetBox.minX, targetBox.minY, cropW, cropH, false)
                     result = tryDecodeWithCode128(otsuSource, isHybrid = false)
 
                     if (result == null) {
                         applyUnsharpMaskXInto(rotatedDataBuffer, enhancedDataBuffer, width, height)
-                        val sharpSource = PlanarYUVLuminanceSource(enhancedDataBuffer, width, height, localizedBox.minX, localizedBox.minY, cropW, cropH, false)
+                        val sharpSource = PlanarYUVLuminanceSource(enhancedDataBuffer, width, height, targetBox.minX, targetBox.minY, cropW, cropH, false)
                         result = tryDecodeWithCode128(sharpSource, isHybrid = false)
                     }
                 }
@@ -166,8 +174,7 @@ class NativeBarcodeScanner(
 
             // STEP 6: Full Frame Fallback
             if (result == null) {
-                applyPercentileOtsuInto(rotatedDataBuffer, enhancedDataBuffer, width, height)
-                val fullSource = PlanarYUVLuminanceSource(enhancedDataBuffer, width, height, 0, 0, width, height, false)
+                val fullSource = PlanarYUVLuminanceSource(rotatedDataBuffer, width, height, 0, 0, width, height, false)
                 result = tryDecodeWithCode128(fullSource, isHybrid = false)
                     ?: tryDecodeWithCode128(fullSource, isHybrid = true)
             }
@@ -548,6 +555,222 @@ class NativeBarcodeScanner(
         val source = PlanarYUVLuminanceSource(projectedDataBuffer, cropW, syntheticH, 0, 0, cropW, syntheticH, false)
         return tryDecodeWithCode128(source, isHybrid = false)
             ?: tryDecodeWithCode128(source, isHybrid = true)
+    }
+
+    /**
+     * Ultra-Fast 1D Binary Barcode Pattern Candidate Isolation (0-1ms execution):
+     * Evaluates horizontal 1D scanlines for alternating binary bar/space sequences (bản chất nhị phân).
+     * Upon detecting a candidate Code 128 start/stop pattern or high-density 1D bar cluster,
+     * it IMMEDIATELY locks onto the exact sub-array [xStart, xEnd] containing ONLY the barcode,
+     * bypassing all surrounding text, logos, and frame margins for instant decoding.
+     */
+    private fun try1DBinaryCandidateSubArrayLock(
+        data: ByteArray, w: Int, h: Int,
+        cropL: Int, cropT: Int, cropW: Int, cropH: Int
+    ): Result? {
+        val stepY = maxOf(2, cropH / 10)
+        val numLines = 9
+
+        val runLengths = IntArray(512)
+        val runXStarts = IntArray(512)
+
+        for (i in 1..numLines) {
+            val sampleY = cropT + i * stepY
+            if (sampleY >= h - 2 || sampleY < 2) continue
+
+            val rowOffset = sampleY * w + cropL
+
+            // 1. Compute row luminance min/max
+            var minLum = 255
+            var maxLum = 0
+            for (x in 0 until cropW step 2) {
+                val lum = data[rowOffset + x].toInt() and 0xFF
+                if (lum < minLum) minLum = lum
+                if (lum > maxLum) maxLum = lum
+            }
+
+            if (maxLum - minLum < 28) continue
+
+            val threshold = (minLum + maxLum) shr 1
+
+            // 2. RLE encode alternating dark/light bars
+            var runCount = 0
+            var currentDark = (data[rowOffset].toInt() and 0xFF) < threshold
+            var currentLen = 0
+            var runStartX = cropL
+
+            for (x in 0 until cropW) {
+                val lum = data[rowOffset + x].toInt() and 0xFF
+                val dark = lum < threshold
+                if (dark == currentDark) {
+                    currentLen++
+                } else {
+                    if (runCount < 512) {
+                        runLengths[runCount] = currentLen
+                        runXStarts[runCount] = runStartX
+                        runCount++
+                    }
+                    currentDark = dark
+                    currentLen = 1
+                    runStartX = cropL + x
+                }
+            }
+            if (runCount < 512) {
+                runLengths[runCount] = currentLen
+                runXStarts[runCount] = runStartX
+                runCount++
+            }
+
+            if (runCount < 12) continue
+
+            // 3. Scan for Start Pattern or Bar Cluster
+            var candidateStartIdx = -1
+            var candidateStopIdx = -1
+
+            for (r in 0 until runCount - 6) {
+                val sum11 = runLengths[r] + runLengths[r+1] + runLengths[r+2] + runLengths[r+3] + runLengths[r+4] + runLengths[r+5]
+                val module11 = sum11 / 11.0f
+
+                if (module11 >= 1.0f) {
+                    val e0 = runLengths[r] / module11
+                    val e1 = runLengths[r+1] / module11
+                    val e2 = runLengths[r+2] / module11
+                    val e3 = runLengths[r+3] / module11
+                    val e4 = runLengths[r+4] / module11
+                    val e5 = runLengths[r+5] / module11
+
+                    val isStartPattern = (Math.abs(e0 - 2f) < 0.95f && Math.abs(e1 - 1f) < 0.95f && Math.abs(e2 - 1f) < 0.95f) &&
+                            ((Math.abs(e3 - 2f) < 0.95f && Math.abs(e5 - 4f) < 0.95f) ||
+                             (Math.abs(e3 - 2f) < 0.95f && Math.abs(e4 - 3f) < 0.95f) ||
+                             (Math.abs(e3 - 4f) < 0.95f && Math.abs(e5 - 2f) < 0.95f))
+
+                    if (isStartPattern) {
+                        candidateStartIdx = r
+                        break
+                    }
+                }
+            }
+
+            var xMin = -1
+            var xMax = -1
+
+            if (candidateStartIdx >= 0) {
+                xMin = runXStarts[candidateStartIdx]
+                for (r in (candidateStartIdx + 12) until runCount - 6) {
+                    val sum13 = runLengths[r] + runLengths[r+1] + runLengths[r+2] + runLengths[r+3] + runLengths[r+4] + runLengths[r+5] + runLengths[r+6]
+                    val module13 = sum13 / 13.0f
+                    if (module13 >= 1.0f) {
+                        val s0 = runLengths[r] / module13
+                        val s1 = runLengths[r+1] / module13
+                        val s2 = runLengths[r+2] / module13
+                        if (Math.abs(s0 - 2f) < 0.95f && Math.abs(s1 - 3f) < 0.95f && Math.abs(s2 - 3f) < 0.95f) {
+                            candidateStopIdx = r + 6
+                            break
+                        }
+                    }
+                }
+                xMax = if (candidateStopIdx >= 0) {
+                    runXStarts[candidateStopIdx] + runLengths[candidateStopIdx]
+                } else {
+                    val endRun = minOf(runCount - 1, candidateStartIdx + 80)
+                    runXStarts[endRun] + runLengths[endRun]
+                }
+            } else {
+                var maxClusterLen = 0
+                var currentClusterStart = -1
+                var currentClusterEnd = -1
+
+                var cStart = 0
+                while (cStart < runCount - 10) {
+                    val avgMod = (runLengths[cStart] + runLengths[cStart+1] + runLengths[cStart+2] + runLengths[cStart+3]) / 6.0f
+                    if (avgMod >= 1.0f && avgMod <= 18.0f) {
+                        var cLen = 0
+                        var cEnd = cStart
+                        for (k in cStart until runCount) {
+                            val ratio = runLengths[k] / avgMod
+                            if (ratio >= 0.5f && ratio <= 6.0f) {
+                                cLen++
+                                cEnd = k
+                            } else {
+                                break
+                            }
+                        }
+                        if (cLen > maxClusterLen && cLen >= 14) {
+                            maxClusterLen = cLen
+                            currentClusterStart = cStart
+                            currentClusterEnd = cEnd
+                        }
+                        cStart += maxOf(1, cLen)
+                    } else {
+                        cStart++
+                    }
+                }
+
+                if (maxClusterLen >= 14 && currentClusterStart >= 0) {
+                    xMin = runXStarts[currentClusterStart]
+                    xMax = runXStarts[currentClusterEnd] + runLengths[currentClusterEnd]
+                }
+            }
+
+            // 4. Lock onto exact sub-array and decode
+            if (xMin >= 0 && xMax > xMin + 40) {
+                val quietZone = 24
+                val lockMinX = maxOf(0, xMin - quietZone)
+                val lockMaxX = minOf(w - 1, xMax + quietZone)
+                val subW = lockMaxX - lockMinX + 1
+
+                val bandHalfHeight = 16
+                val lockMinY = maxOf(0, sampleY - bandHalfHeight)
+                val lockMaxY = minOf(h - 1, sampleY + bandHalfHeight)
+                val subH = lockMaxY - lockMinY + 1
+
+                if (subW > 50 && subH > 10) {
+                    val subSource = PlanarYUVLuminanceSource(
+                        data, w, h,
+                        lockMinX, lockMinY, subW, subH, false
+                    )
+
+                    val res = tryDecodeWithCode128(subSource, isHybrid = false)
+                        ?: tryDecodeWithCode128(subSource, isHybrid = true)
+
+                    if (res != null) return res
+                }
+            }
+        }
+
+        return null
+    }
+
+    /**
+     * Ultra-fast multi-line 1D scanline extraction across center crop box (0-1ms execution):
+     * Extracts 5 horizontal 1D pixel slices replicated vertically into a 16px high buffer.
+     * This bypasses multi-row 2D image matrix parsing overhead when a barcode is already sharp and clear.
+     */
+    private fun tryMultiLineScanlineDecode(data: ByteArray, w: Int, h: Int, cropL: Int, cropT: Int, cropW: Int, cropH: Int): Result? {
+        val syntheticH = 16
+        val requiredBufSize = cropW * syntheticH
+        if (projectedDataBuffer.size < requiredBufSize) {
+            projectedDataBuffer = ByteArray(requiredBufSize)
+        }
+
+        val stepY = maxOf(1, cropH / 6)
+        for (i in 1..5) {
+            val sampleY = cropT + i * stepY
+            if (sampleY >= h) continue
+            val rowOffset = sampleY * w + cropL
+
+            // Replicate single 1D row into 16 rows to form a PlanarYUVLuminanceSource
+            for (r in 0 until syntheticH) {
+                System.arraycopy(data, rowOffset, projectedDataBuffer, r * cropW, cropW)
+            }
+
+            val source = PlanarYUVLuminanceSource(projectedDataBuffer, cropW, syntheticH, 0, 0, cropW, syntheticH, false)
+            val result = tryDecodeWithCode128(source, isHybrid = false)
+                ?: tryDecodeWithCode128(source, isHybrid = true)
+            if (result != null) return result
+        }
+
+        return null
     }
 
     /**
