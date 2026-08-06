@@ -106,90 +106,68 @@ class NativeBarcodeScanner(
 
             var result: Result? = null
 
-            // PASS 1: Center Aiming Crop (80% W x 50% H) Direct Code128 Decoding (0-1ms)
-            // Instant decode when barcode is under central red laser guide
+            // STEP 1: Ultra-Fast Barcode ROI Localization (0-1ms)
+            // Locks onto exact [minX, minY, maxX, maxY] sub-array of 1D Code 128 vertical bars
+            val localizedBox = locateAnisotropyBarcodeBox(rotatedDataBuffer, width, height)
+
+            // STEP 2: Immediate Localized Sub-Array Decoding (1-2ms)
+            if (localizedBox != null) {
+                val cropW = localizedBox.maxX - localizedBox.minX + 1
+                val cropH = localizedBox.maxY - localizedBox.minY + 1
+                if (cropW > 50 && cropH > 15) {
+                    val localizedSource = PlanarYUVLuminanceSource(
+                        rotatedDataBuffer, width, height,
+                        localizedBox.minX, localizedBox.minY, cropW, cropH, false
+                    )
+                    // Direct decode on clean localized barcode array without text noise
+                    result = tryDecodeWithCode128(localizedSource, isHybrid = false)
+                        ?: tryDecodeWithCode128(localizedSource, isHybrid = true)
+
+                    // If raw crop fails, try localized column projection on localized box
+                    if (result == null) {
+                        result = tryLocalizedColumnProjection(rotatedDataBuffer, width, height, localizedBox)
+                    }
+                }
+            }
+
+            // STEP 3: Fallback Center Aiming Crop (If localization did not yield a result)
             val centerW = (width * 0.80f).toInt()
             val centerH = (height * 0.50f).toInt()
             val centerL = (width - centerW) / 2
             val centerT = (height - centerH) / 2
-            if (centerW > 60 && centerH > 20) {
+
+            if (result == null && centerW > 60 && centerH > 20) {
                 val centerSource = PlanarYUVLuminanceSource(rotatedDataBuffer, width, height, centerL, centerT, centerW, centerH, false)
                 result = tryDecodeWithCode128(centerSource, isHybrid = false)
                     ?: tryDecodeWithCode128(centerSource, isHybrid = true)
             }
 
-            // PASS 2: Rust WASM Anisotropy Gradient Localization (Max edge energy)
-            val localizedBox = if (result == null) locateAnisotropyBarcodeBox(rotatedDataBuffer, width, height) else null
-
-            // PASS 3: Localized Column Projection within ROI
-            if (result == null && localizedBox != null) {
-                result = tryLocalizedColumnProjection(rotatedDataBuffer, width, height, localizedBox)
-            }
-
-            // PASS 4: Direct Localized Crop Code128 Decoding
-            if (result == null && localizedBox != null) {
-                val cropW = localizedBox.maxX - localizedBox.minX + 1
-                val cropH = localizedBox.maxY - localizedBox.minY + 1
-                if (cropW > 60 && cropH > 20) {
-                    val source = PlanarYUVLuminanceSource(
-                        rotatedDataBuffer, width, height,
-                        localizedBox.minX, localizedBox.minY, cropW, cropH, false
-                    )
-                    result = tryDecodeWithCode128(source, isHybrid = false)
-                        ?: tryDecodeWithCode128(source, isHybrid = true)
-                }
-            }
-
-            // PASS 5: Global Vertical Column Integration (Scratch/Streak Dilation)
+            // STEP 4: Global Column Projection (For dirty/scratched vertical bars across full box)
             if (result == null) {
                 result = tryCognexVerticalProjection(rotatedDataBuffer, width, height)
             }
 
-            // PASS 6: Unsharp Mask Horizontal Sharpening (Restores blurred/faded bar edges)
-            if (result == null) {
-                applyUnsharpMaskXInto(rotatedDataBuffer, enhancedDataBuffer, width, height)
-                if (localizedBox != null) {
-                    val cropW = localizedBox.maxX - localizedBox.minX + 1
-                    val cropH = localizedBox.maxY - localizedBox.minY + 1
-                    if (cropW > 60 && cropH > 20) {
-                        val source = PlanarYUVLuminanceSource(enhancedDataBuffer, width, height, localizedBox.minX, localizedBox.minY, cropW, cropH, false)
-                        result = tryDecodeWithCode128(source, isHybrid = false)
+            // STEP 5: Localized Enhancement (Otsu & Unsharp Mask ONLY on localized ROI for max speed)
+            if (result == null && localizedBox != null) {
+                val cropW = localizedBox.maxX - localizedBox.minX + 1
+                val cropH = localizedBox.maxY - localizedBox.minY + 1
+                if (cropW > 50 && cropH > 15) {
+                    applyPercentileOtsuInto(rotatedDataBuffer, enhancedDataBuffer, width, height)
+                    val otsuSource = PlanarYUVLuminanceSource(enhancedDataBuffer, width, height, localizedBox.minX, localizedBox.minY, cropW, cropH, false)
+                    result = tryDecodeWithCode128(otsuSource, isHybrid = false)
+
+                    if (result == null) {
+                        applyUnsharpMaskXInto(rotatedDataBuffer, enhancedDataBuffer, width, height)
+                        val sharpSource = PlanarYUVLuminanceSource(enhancedDataBuffer, width, height, localizedBox.minX, localizedBox.minY, cropW, cropH, false)
+                        result = tryDecodeWithCode128(sharpSource, isHybrid = false)
                     }
                 }
-                if (result == null && centerW > 60 && centerH > 20) {
-                    val centerSource = PlanarYUVLuminanceSource(enhancedDataBuffer, width, height, centerL, centerT, centerW, centerH, false)
-                    result = tryDecodeWithCode128(centerSource, isHybrid = false)
-                        ?: tryDecodeWithCode128(centerSource, isHybrid = true)
-                }
             }
 
-            // PASS 7: Percentile Stretch + Otsu Adaptive Thresholding (For low-contrast faded print)
+            // STEP 6: Full Frame Fallback
             if (result == null) {
                 applyPercentileOtsuInto(rotatedDataBuffer, enhancedDataBuffer, width, height)
-                val centerSource = PlanarYUVLuminanceSource(enhancedDataBuffer, width, height, centerL, centerT, centerW, centerH, false)
-                result = tryDecodeWithCode128(centerSource, isHybrid = false)
-                    ?: tryDecodeWithCode128(centerSource, isHybrid = true)
-            }
-
-            // PASS 8: Sauvola Local Window Binarization
-            if (result == null) {
-                applySauvolaInto(rotatedDataBuffer, enhancedDataBuffer, width, height)
-                val centerSource = PlanarYUVLuminanceSource(enhancedDataBuffer, width, height, centerL, centerT, centerW, centerH, false)
-                result = tryDecodeWithCode128(centerSource, isHybrid = false)
-                    ?: tryDecodeWithCode128(centerSource, isHybrid = true)
-            }
-
-            // PASS 9: Thermal Print Head Min-Filter (Dilation along vertical barcode lines)
-            if (result == null) {
-                repairThermalHeadInto(rotatedDataBuffer, cropDataBuffer, width, height)
-                val source = PlanarYUVLuminanceSource(cropDataBuffer, width, height, 0, 0, width, height, false)
-                result = tryDecodeWithCode128(source, isHybrid = false)
-                    ?: tryDecodeWithCode128(source, isHybrid = true)
-            }
-
-            // PASS 10: Full Code 128 Frame Fallback
-            if (result == null) {
-                val fullSource = PlanarYUVLuminanceSource(rotatedDataBuffer, width, height, 0, 0, width, height, false)
+                val fullSource = PlanarYUVLuminanceSource(enhancedDataBuffer, width, height, 0, 0, width, height, false)
                 result = tryDecodeWithCode128(fullSource, isHybrid = false)
                     ?: tryDecodeWithCode128(fullSource, isHybrid = true)
             }
