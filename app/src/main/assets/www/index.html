@@ -68,15 +68,12 @@
         <!-- Action Bar -->
         <div class="bg-white border border-slate-200 rounded-xl p-3 shadow-xs flex items-center justify-between gap-2">
             <div class="flex items-center gap-2">
-                <button onclick="triggerNativeScanner()" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs active:scale-95 flex items-center gap-1.5 transition-all">
+                <button onclick="triggerNativeScanner()" class="px-5 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md active:scale-95 flex items-center gap-2 transition-all">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h0.93a2 2 0 001.664-.89l0.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l0.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path></svg>
-                    Quét Native (Siêu Tốc)
-                </button>
-                <button onclick="openCameraModal()" class="px-3.5 py-2 rounded-lg bg-slate-700 hover:bg-slate-800 text-white font-semibold text-xs shadow-xs active:scale-95 transition-all">
-                    Quét Web
+                    Quét Mã Native (100% Native Ultra Engine)
                 </button>
             </div>
-            <button onclick="resetScanScreen()" class="px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium border border-slate-200">
+            <button onclick="resetScanScreen()" class="px-3.5 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold border border-slate-200">
                 Làm Mới
             </button>
         </div>
@@ -130,24 +127,6 @@
 
     </main>
 
-    <!-- Web Camera Modal -->
-    <div id="camera-modal" class="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs hidden flex-col items-center justify-center p-3">
-        <div class="relative w-full max-w-lg bg-white rounded-xl overflow-hidden shadow-xl flex flex-col">
-            <div class="bg-slate-50 px-3 py-2 flex items-center justify-between border-b border-slate-200">
-                <span class="font-bold text-xs text-slate-900">Web Camera Mode</span>
-                <button onclick="stopCameraScanner()" class="p-1 text-slate-500 hover:text-slate-800">✕</button>
-            </div>
-            <div class="relative bg-black w-full aspect-video flex items-center justify-center overflow-hidden">
-                <video id="web-video-element" class="w-full h-full object-cover" autoplay playsinline></video>
-                <div class="laser-line"></div>
-                <div id="camera-placeholder" class="absolute text-slate-300 text-xs">Đang mở camera web...</div>
-            </div>
-            <div class="p-2.5 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 text-xs">
-                <button onclick="stopCameraScanner()" class="px-3 py-1.5 rounded-lg bg-slate-200 text-slate-700 font-medium">Đóng</button>
-            </div>
-        </div>
-    </div>
-
     <script>
         const isAndroidNative = typeof window.AndroidNative !== 'undefined' || typeof window.AndroidScanner !== 'undefined';
         const nativeBridge = window.AndroidNative || window.AndroidScanner;
@@ -165,8 +144,6 @@
         function triggerNativeScanner() {
             if (isAndroidNative && nativeBridge && nativeBridge.scanBarcodeNative) {
                 nativeBridge.scanBarcodeNative();
-            } else {
-                openCameraModal();
             }
         }
 
@@ -289,33 +266,6 @@
                 osc.start();
                 osc.stop(audioCtx.currentTime + 0.1);
             } catch (e) { }
-        }
-
-        let webCameraStream = null;
-        function openCameraModal() {
-            document.getElementById('camera-modal').classList.remove('hidden');
-            document.getElementById('camera-modal').classList.add('flex');
-            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-                    .then(stream => {
-                        webCameraStream = stream;
-                        document.getElementById('web-video-element').srcObject = stream;
-                        document.getElementById('camera-placeholder').style.display = 'none';
-                    })
-                    .catch(err => {
-                        document.getElementById('camera-placeholder').innerText = 'Lỗi camera web: ' + err.message;
-                    });
-            }
-        }
-
-        function stopCameraScanner() {
-            const modal = document.getElementById('camera-modal');
-            modal.classList.add('hidden');
-            modal.classList.remove('flex');
-            if (webCameraStream) {
-                webCameraStream.getTracks().forEach(track => track.stop());
-                webCameraStream = null;
-            }
         }
     </script>
 </body>
