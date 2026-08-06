@@ -113,15 +113,9 @@ class MainActivity : ComponentActivity() {
                 
                 if (typeof window.onNativeBarcodeScanned === 'function') {
                     window.onNativeBarcodeScanned(code, format, decodeMs);
-                }
-                if (typeof window.handleScannedCode === 'function') {
+                } else if (typeof window.handleScannedCode === 'function') {
                     window.handleScannedCode(code, 'Native ' + format, format, decodeMs);
                 }
-                try {
-                    var event = new CustomEvent('nativeBarcodeScanned', { detail: { barcode: code, format: format, decodeMs: decodeMs } });
-                    window.dispatchEvent(event);
-                    document.dispatchEvent(event);
-                } catch(e) { }
             })();
         """.trimIndent()
         

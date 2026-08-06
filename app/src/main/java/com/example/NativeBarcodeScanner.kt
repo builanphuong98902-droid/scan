@@ -5,71 +5,25 @@ import androidx.annotation.OptIn
 import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
-import com.google.zxing.BarcodeFormat
 import com.google.zxing.BinaryBitmap
-import com.google.zxing.DecodeHintType
 import com.google.zxing.LuminanceSource
-import com.google.zxing.MultiFormatReader
 import com.google.zxing.NotFoundException
 import com.google.zxing.PlanarYUVLuminanceSource
 import com.google.zxing.Result
 import com.google.zxing.common.GlobalHistogramBinarizer
 import com.google.zxing.common.HybridBinarizer
 import com.google.zxing.oned.Code128Reader
-import java.util.EnumMap
 
 class NativeBarcodeScanner(
     private val onBarcodeScanned: (code: String, format: String, decodeMs: Long) -> Unit
 ) : ImageAnalysis.Analyzer {
 
-    // Dedicated readers
+    // Dedicated ultra-fast Code 128 Reader (0-2ms execution)
     private val code128Reader = Code128Reader()
-
-    // Fast 1D Reader for Code 128, Code 39, Code 93, EAN, UPC
-    private val fast1DReader = MultiFormatReader().apply {
-        val hints = EnumMap<DecodeHintType, Any>(DecodeHintType::class.java).apply {
-            put(
-                DecodeHintType.POSSIBLE_FORMATS,
-                listOf(
-                    BarcodeFormat.CODE_128,
-                    BarcodeFormat.CODE_39,
-                    BarcodeFormat.CODE_93,
-                    BarcodeFormat.EAN_13,
-                    BarcodeFormat.EAN_8,
-                    BarcodeFormat.UPC_A,
-                    BarcodeFormat.ITF
-                )
-            )
-            put(DecodeHintType.TRY_HARDER, false)
-        }
-        setHints(hints)
-    }
-
-    // Full Reader for 2D (QR, DataMatrix, PDF417) and general fallback
-    private val fullReader = MultiFormatReader().apply {
-        val hints = EnumMap<DecodeHintType, Any>(DecodeHintType::class.java).apply {
-            put(
-                DecodeHintType.POSSIBLE_FORMATS,
-                listOf(
-                    BarcodeFormat.CODE_128,
-                    BarcodeFormat.EAN_13,
-                    BarcodeFormat.UPC_A,
-                    BarcodeFormat.CODE_39,
-                    BarcodeFormat.CODE_93,
-                    BarcodeFormat.ITF,
-                    BarcodeFormat.QR_CODE,
-                    BarcodeFormat.DATA_MATRIX,
-                    BarcodeFormat.PDF_417
-                )
-            )
-            put(DecodeHintType.TRY_HARDER, false)
-        }
-        setHints(hints)
-    }
 
     private var lastScannedCode = ""
     private var lastScannedTimestamp = 0L
-    private val debounceMs = 800L
+    private val debounceMs = 1000L
 
     // Reusable buffers to achieve zero GC overhead & 60 FPS speed
     private var yDataBuffer = ByteArray(1920 * 1080)
@@ -152,15 +106,16 @@ class NativeBarcodeScanner(
 
             var result: Result? = null
 
-            // PASS 1: Center Aiming Crop (70% W x 45% H) Direct Code128 Decoding (0-3ms)
-            // Instant dekick when barcode is under central red laser guide
-            val centerW = (width * 0.75f).toInt()
-            val centerH = (height * 0.45f).toInt()
+            // PASS 1: Center Aiming Crop (80% W x 50% H) Direct Code128 Decoding (0-1ms)
+            // Instant decode when barcode is under central red laser guide
+            val centerW = (width * 0.80f).toInt()
+            val centerH = (height * 0.50f).toInt()
             val centerL = (width - centerW) / 2
             val centerT = (height - centerH) / 2
             if (centerW > 60 && centerH > 20) {
                 val centerSource = PlanarYUVLuminanceSource(rotatedDataBuffer, width, height, centerL, centerT, centerW, centerH, false)
                 result = tryDecodeWithCode128(centerSource, isHybrid = false)
+                    ?: tryDecodeWithCode128(centerSource, isHybrid = true)
             }
 
             // PASS 2: Rust WASM Anisotropy Gradient Localization (Max edge energy)
@@ -204,7 +159,7 @@ class NativeBarcodeScanner(
                 if (result == null && centerW > 60 && centerH > 20) {
                     val centerSource = PlanarYUVLuminanceSource(enhancedDataBuffer, width, height, centerL, centerT, centerW, centerH, false)
                     result = tryDecodeWithCode128(centerSource, isHybrid = false)
-                        ?: tryDecode(centerSource, isHybrid = true, reader = fast1DReader)
+                        ?: tryDecodeWithCode128(centerSource, isHybrid = true)
                 }
             }
 
@@ -213,7 +168,7 @@ class NativeBarcodeScanner(
                 applyPercentileOtsuInto(rotatedDataBuffer, enhancedDataBuffer, width, height)
                 val centerSource = PlanarYUVLuminanceSource(enhancedDataBuffer, width, height, centerL, centerT, centerW, centerH, false)
                 result = tryDecodeWithCode128(centerSource, isHybrid = false)
-                    ?: tryDecode(centerSource, isHybrid = false, reader = fast1DReader)
+                    ?: tryDecodeWithCode128(centerSource, isHybrid = true)
             }
 
             // PASS 8: Sauvola Local Window Binarization
@@ -221,7 +176,7 @@ class NativeBarcodeScanner(
                 applySauvolaInto(rotatedDataBuffer, enhancedDataBuffer, width, height)
                 val centerSource = PlanarYUVLuminanceSource(enhancedDataBuffer, width, height, centerL, centerT, centerW, centerH, false)
                 result = tryDecodeWithCode128(centerSource, isHybrid = false)
-                    ?: tryDecode(centerSource, isHybrid = false, reader = fast1DReader)
+                    ?: tryDecodeWithCode128(centerSource, isHybrid = true)
             }
 
             // PASS 9: Thermal Print Head Min-Filter (Dilation along vertical barcode lines)
@@ -229,14 +184,14 @@ class NativeBarcodeScanner(
                 repairThermalHeadInto(rotatedDataBuffer, cropDataBuffer, width, height)
                 val source = PlanarYUVLuminanceSource(cropDataBuffer, width, height, 0, 0, width, height, false)
                 result = tryDecodeWithCode128(source, isHybrid = false)
-                    ?: tryDecode(source, isHybrid = false, reader = fast1DReader)
+                    ?: tryDecodeWithCode128(source, isHybrid = true)
             }
 
-            // PASS 10: Full Multi-Format Reader Fallback
+            // PASS 10: Full Code 128 Frame Fallback
             if (result == null) {
                 val fullSource = PlanarYUVLuminanceSource(rotatedDataBuffer, width, height, 0, 0, width, height, false)
-                result = tryDecode(fullSource, isHybrid = false, reader = fullReader)
-                    ?: tryDecode(fullSource, isHybrid = true, reader = fullReader)
+                result = tryDecodeWithCode128(fullSource, isHybrid = false)
+                    ?: tryDecodeWithCode128(fullSource, isHybrid = true)
             }
 
             if (result != null) {
@@ -248,7 +203,7 @@ class NativeBarcodeScanner(
                 if (code.isNotEmpty() && (code != lastScannedCode || now - lastScannedTimestamp > debounceMs)) {
                     lastScannedCode = code
                     lastScannedTimestamp = now
-                    Log.d("CognexEngine", "Decoded in ${decodeMs}ms: $code ($format)")
+                    Log.d("CognexEngine", "Decoded Code 128 in ${decodeMs}ms: $code")
                     onBarcodeScanned(code, format, decodeMs)
                 }
             }
@@ -256,8 +211,6 @@ class NativeBarcodeScanner(
             Log.e("CognexEngine", "Error analyzing frame", e)
         } finally {
             code128Reader.reset()
-            fast1DReader.reset()
-            fullReader.reset()
             imageProxy.close()
         }
     }
@@ -574,8 +527,6 @@ class NativeBarcodeScanner(
 
         return tryDecodeWithCode128(source, isHybrid = false)
             ?: tryDecodeWithCode128(source, isHybrid = true)
-            ?: tryDecode(source, isHybrid = false, reader = fast1DReader)
-            ?: tryDecode(source, isHybrid = true, reader = fast1DReader)
     }
 
     /**
@@ -619,8 +570,6 @@ class NativeBarcodeScanner(
         val source = PlanarYUVLuminanceSource(projectedDataBuffer, cropW, syntheticH, 0, 0, cropW, syntheticH, false)
         return tryDecodeWithCode128(source, isHybrid = false)
             ?: tryDecodeWithCode128(source, isHybrid = true)
-            ?: tryDecode(source, isHybrid = false, reader = fast1DReader)
-            ?: tryDecode(source, isHybrid = true, reader = fast1DReader)
     }
 
     /**
@@ -656,28 +605,17 @@ class NativeBarcodeScanner(
 
         val source = PlanarYUVLuminanceSource(projectedDataBuffer, syntheticW, cropH, 0, 0, syntheticW, cropH, false)
         return tryDecodeWithCode128(source, isHybrid = false)
-            ?: tryDecode(source, isHybrid = false, reader = fast1DReader)
+            ?: tryDecodeWithCode128(source, isHybrid = true)
     }
 
     private fun tryDecodeWithCode128(source: LuminanceSource, isHybrid: Boolean): Result? {
+        val binarizer = if (isHybrid) HybridBinarizer(source) else GlobalHistogramBinarizer(source)
         return try {
-            val binarizer = if (isHybrid) HybridBinarizer(source) else GlobalHistogramBinarizer(source)
             code128Reader.decode(BinaryBitmap(binarizer))
         } catch (_: NotFoundException) {
             null
         } finally {
             code128Reader.reset()
-        }
-    }
-
-    private fun tryDecode(source: LuminanceSource, isHybrid: Boolean, reader: MultiFormatReader): Result? {
-        return try {
-            val binarizer = if (isHybrid) HybridBinarizer(source) else GlobalHistogramBinarizer(source)
-            reader.decodeWithState(BinaryBitmap(binarizer))
-        } catch (_: NotFoundException) {
-            null
-        } finally {
-            reader.reset()
         }
     }
 
