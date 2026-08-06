@@ -23,6 +23,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -100,6 +101,7 @@ fun CameraOverlay(
 
     var lensFacing by remember { mutableStateOf(CameraSelector.LENS_FACING_BACK) }
     var isFlashOn by remember { mutableStateOf(false) }
+    var currentZoomRatio by remember { mutableStateOf(1.0f) }
     var cameraControl by remember { mutableStateOf<androidx.camera.core.CameraControl?>(null) }
     var lastDecodeLatency by remember { mutableStateOf<Long?>(null) }
     var lastDecodedCode by remember { mutableStateOf<String?>(null) }
@@ -281,6 +283,40 @@ fun CameraOverlay(
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
+
+                // Zoom Controls Bar
+                Row(
+                    modifier = Modifier
+                        .background(Color.Black.copy(alpha = 0.65f), CircleShape)
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val zoomOptions = listOf(1.0f, 1.5f, 2.0f, 3.0f)
+                    zoomOptions.forEach { ratio ->
+                        val isSelected = currentZoomRatio == ratio
+                        Box(
+                            modifier = Modifier
+                                .padding(horizontal = 4.dp)
+                                .clip(CircleShape)
+                                .background(if (isSelected) Color(0xFF2563EB) else Color.Transparent)
+                                .clickable {
+                                    currentZoomRatio = ratio
+                                    cameraControl?.setZoomRatio(ratio)
+                                }
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "${if (ratio % 1.0f == 0f) ratio.toInt().toString() else ratio.toString()}x",
+                                color = if (isSelected) Color.White else Color(0xFFD1D5DB),
+                                fontSize = 13.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
 
                 Surface(
                     color = Color.Black.copy(alpha = 0.75f),
